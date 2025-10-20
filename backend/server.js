@@ -69,11 +69,11 @@ app.post('/api/auth/register', (req, res) => {
   }
 
   const duplicate = mockUsers.find(
-    u => u.username?.toLowerCase() === String(username).toLowerCase() || u.email?.toLowerCase() === String(email).toLowerCase()
+    u => u.email?.toLowerCase() === String(email).toLowerCase()
   );
 
   if (duplicate) {
-    return res.status(409).json({ error: 'Email or username already exists, please choose another.' });
+    return res.status(409).json({ error: 'Email already exists, please choose another.' });
   }
 
   const newUser = {
