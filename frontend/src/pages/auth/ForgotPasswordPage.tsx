@@ -4,11 +4,21 @@ import { KeyRound, AlertCircle, CheckCircle } from 'lucide-react';
 
 const ForgotPasswordPage: React.FC = () => {
   const [email, setEmail] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
+  const [sentCode, setSentCode] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Generate random 5-digit verification code
+  const generateVerificationCode = () => {
+    return Math.floor(10000 + Math.random() * 90000).toString();
+  };
+
+  const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!email) {
@@ -20,13 +30,89 @@ const ForgotPasswordPage: React.FC = () => {
     setError('');
     setSuccess('');
 
-    // Simulate API call
+    // Call real backend API to send verification code
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      setSuccess('Password reset instructions have been sent to your email address.');
+      const response = await fetch('http://localhost:3001/api/auth/send-verification-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || 'Failed to send verification code');
+        setIsLoading(false);
+        return;
+      }
+
+      // Store the code for verification
+      setSentCode(data.testCode);
+      setCodeSent(true);
+      setSuccess(`Verification code sent to ${email}. Code: ${data.testCode} (for testing)`);
     } catch (err) {
-      setError('Failed to send reset instructions. Please try again.');
+      console.error('Send code error:', err);
+      setError('Failed to send verification code. Please check your connection and try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!verificationCode || !newPassword || !confirmPassword) {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters long');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    setSuccess('');
+
+    // Call real backend API to reset password
+    try {
+      const response = await fetch('http://localhost:3001/api/auth/reset-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          code: verificationCode,
+          newPassword,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || 'Failed to reset password');
+        setIsLoading(false);
+        return;
+      }
+
+      setSuccess('Password has been reset successfully! Redirecting to login...');
+      
+      // Redirect to login page after 2 seconds
+      setTimeout(() => {
+        window.location.href = '/login';
+      }, 2000);
+    } catch (err) {
+      console.error('Reset password error:', err);
+      setError('Failed to reset password. Please check your connection and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -57,27 +143,104 @@ const ForgotPasswordPage: React.FC = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">Email Address</label>
-            <input 
-              type="email" 
-              className="w-full px-4 py-3 rounded-lg border focus:ring-2 focus:ring-primary-500 focus:border-transparent" 
-              required 
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Enter your email address"
-            />
-          </div>
-          
-          <button 
-            type="submit" 
-            disabled={isLoading}
-            className={`btn-primary w-full ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            {isLoading ? 'Sending...' : 'Send Reset Instructions'}
-          </button>
-        </form>
+        {!codeSent ? (
+          <form onSubmit={handleSendCode} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Email Address</label>
+              <input 
+                type="email" 
+                className="w-full px-4 py-3 rounded-lg border focus:ring-2 focus:ring-primary-500 focus:border-transparent" 
+                required 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your email address"
+              />
+            </div>
+            
+            <button 
+              type="submit" 
+              disabled={isLoading}
+              className={`btn-primary w-full ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {isLoading ? 'Sending...' : 'Send Verification Code'}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleResetPassword} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Email Address</label>
+              <input 
+                type="email" 
+                className="w-full px-4 py-3 rounded-lg border bg-gray-100" 
+                value={email}
+                disabled
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Verification Code</label>
+              <input 
+                type="text" 
+                className="w-full px-4 py-3 rounded-lg border focus:ring-2 focus:ring-primary-500 focus:border-transparent" 
+                required 
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)}
+                placeholder="Enter 5-digit verification code"
+                maxLength={5}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">New Password</label>
+              <input 
+                type="password" 
+                className="w-full px-4 py-3 rounded-lg border focus:ring-2 focus:ring-primary-500 focus:border-transparent" 
+                required 
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Enter new password"
+                minLength={6}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Confirm New Password</label>
+              <input 
+                type="password" 
+                className="w-full px-4 py-3 rounded-lg border focus:ring-2 focus:ring-primary-500 focus:border-transparent" 
+                required 
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                minLength={6}
+              />
+            </div>
+            
+            <button 
+              type="submit" 
+              disabled={isLoading}
+              className={`btn-primary w-full ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {isLoading ? 'Resetting...' : 'Reset Password'}
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => {
+                setCodeSent(false);
+                setVerificationCode('');
+                setNewPassword('');
+                setConfirmPassword('');
+                setSentCode('');
+                setError('');
+                setSuccess('');
+              }}
+              className="w-full py-2 px-4 text-sm text-gray-600 hover:text-gray-800"
+            >
+              ← Back to send new code
+            </button>
+          </form>
+        )}
 
         <div className="text-center mt-6 space-y-2">
           <p className="text-gray-600">
