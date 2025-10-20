@@ -6,6 +6,7 @@ import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
 import RegisterChildPage from './pages/auth/RegisterChildPage';
 import RegisterParentPage from './pages/auth/RegisterParentPage';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 import PortfolioCreate from './pages/portfolio/PortfolioCreate';
 import ShowYourLights from './pages/portfolio/ShowYourLights';
 import PortfolioDetail from './pages/portfolio/PortfolioDetail';
@@ -26,6 +27,7 @@ function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/register/child" element={<RegisterChildPage />} />
           <Route path="/register/parent" element={<RegisterParentPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/portfolio" element={<ShowYourLights />} />
           <Route path="/portfolio/create" element={<PortfolioCreate />} />
           <Route path="/portfolio/:id" element={<PortfolioDetail />} />
