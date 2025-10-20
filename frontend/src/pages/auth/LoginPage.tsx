@@ -12,9 +12,10 @@ const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
 
   useEffect(() => {
-    const state = location.state as { email?: string; username?: string } | null;
+    const state = location.state as { email?: string; username?: string; password?: string } | null;
     if (state?.email) setEmail(state.email);
     if (state?.username) setUsername(state.username);
+    if (state?.password) setPassword(state.password);
   }, [location.state]);
   
   const handleSubmit = (e: React.FormEvent) => {
