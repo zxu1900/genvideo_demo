@@ -48,6 +48,10 @@ const RegisterPage: React.FC = () => {
 
     // Call real backend API
     try {
+      console.log('=== REGISTRATION ATTEMPT ===');
+      console.log('Email:', formData.email);
+      console.log('Username:', formData.username);
+      
       const response = await fetch('http://localhost:3001/api/auth/register', {
         method: 'POST',
         headers: {
@@ -62,13 +66,17 @@ const RegisterPage: React.FC = () => {
         }),
       });
 
+      console.log('Response status:', response.status);
       const data = await response.json();
+      console.log('Response data:', data);
 
       if (!response.ok) {
         // Handle duplicate email or other errors
         if (response.status === 409) {
+          console.log('❌ DUPLICATE EMAIL DETECTED');
           setError('Registration failed, email already exists');
         } else {
+          console.log('❌ OTHER ERROR:', data.error);
           setError(data.error || 'Registration failed. Please try again.');
         }
         setIsLoading(false);
