@@ -16,9 +16,6 @@ const RegisterPage: React.FC = () => {
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Mock registered emails for duplicate checking
-  const registeredEmails = ['test@example.com', 'demo@writetalent.com', 'user@test.com', 'admin@writetalent.com'];
-
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -36,15 +33,6 @@ const RegisterPage: React.FC = () => {
     setError('');
     setSuccess('');
 
-    // Check for duplicate email
-    const isDuplicate = registeredEmails.includes(formData.email);
-    
-    if (isDuplicate) {
-      setError('Registration failed, email already exists');
-      setIsLoading(false);
-      return;
-    }
-
     // Validate form
     if (!formData.username || !formData.email || !formData.password) {
       setError('Please fill in all required fields');
@@ -58,10 +46,36 @@ const RegisterPage: React.FC = () => {
       return;
     }
 
-    // Simulate API call
+    // Call real backend API
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
+      const response = await fetch('http://localhost:3001/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: formData.username,
+          email: formData.email,
+          password: formData.password,
+          type: accountType,
+          age: accountType === 'child' ? parseInt(formData.age) : undefined,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Handle duplicate email or other errors
+        if (response.status === 409) {
+          setError('Registration failed, email already exists');
+        } else {
+          setError(data.error || 'Registration failed. Please try again.');
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // Registration successful
       setSuccess('Registration successful! Redirecting to login...');
       
       // Redirect to login page with prefilled data after 1 second
@@ -75,7 +89,8 @@ const RegisterPage: React.FC = () => {
         });
       }, 1000);
     } catch (err) {
-      setError('Registration failed. Please try again.');
+      console.error('Registration error:', err);
+      setError('Registration failed. Please check your connection and try again.');
     } finally {
       setIsLoading(false);
     }
