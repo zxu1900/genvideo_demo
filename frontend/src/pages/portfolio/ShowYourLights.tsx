@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Heart, Eye, Search, Filter, Star, Clock, TrendingUp } from 'lucide-react';
+import { Heart, Eye, Search, Filter, Star, Clock, TrendingUp, ChevronDown } from 'lucide-react';
 import { mockPortfolios, themeData } from '../../utils/mockData';
 
 const ShowYourLights: React.FC = () => {
@@ -9,6 +9,22 @@ const ShowYourLights: React.FC = () => {
   const [selectedAge, setSelectedAge] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('latest');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
+  const themeDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (themeDropdownRef.current && !themeDropdownRef.current.contains(event.target as Node)) {
+        setIsThemeDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const filteredPortfolios = portfolios.filter(portfolio => {
     const matchesTheme = selectedTheme === 'all' || portfolio.theme === selectedTheme;
@@ -60,17 +76,59 @@ const ShowYourLights: React.FC = () => {
               />
             </div>
 
-            {/* Theme Filter */}
-            <select
-              value={selectedTheme}
-              onChange={(e) => setSelectedTheme(e.target.value)}
-              className="px-4 py-3 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            >
-              <option value="all">All Themes</option>
-              {themeData.map(theme => (
-                <option key={theme.id} value={theme.id}>{theme.name}</option>
-              ))}
-            </select>
+            {/* Theme Filter - Custom Dropdown */}
+            <div className="relative" ref={themeDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsThemeDropdownOpen(!isThemeDropdownOpen)}
+                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent flex items-center justify-between bg-white"
+              >
+                <span className="flex items-center gap-2">
+                  {selectedTheme === 'all' ? (
+                    <>All Themes</>
+                  ) : (
+                    <>
+                      <span className="text-lg">{themeData.find(t => t.id === selectedTheme)?.icon}</span>
+                      {themeData.find(t => t.id === selectedTheme)?.name}
+                    </>
+                  )}
+                </span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${isThemeDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {isThemeDropdownOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedTheme('all');
+                      setIsThemeDropdownOpen(false);
+                    }}
+                    className={`w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-2 ${
+                      selectedTheme === 'all' ? 'bg-primary-50 text-primary-600' : ''
+                    }`}
+                  >
+                    All Themes
+                  </button>
+                  {themeData.map(theme => (
+                    <button
+                      key={theme.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTheme(theme.id);
+                        setIsThemeDropdownOpen(false);
+                      }}
+                      className={`w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-2 ${
+                        selectedTheme === theme.id ? 'bg-primary-50 text-primary-600' : ''
+                      }`}
+                    >
+                      <span className="text-lg">{theme.icon}</span>
+                      {theme.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Age Filter */}
             <select
