@@ -86,11 +86,15 @@ const AboutPage: React.FC = () => {
           <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight">
             When AI Can Do Everything,<br />What Can Our Children Do?
           </h1>
-          <p className="text-2xl md:text-3xl mb-8 leading-relaxed">
-            The future belongs to children who have both creativity and the ability to collaborate with AI.
+          <p className="text-2xl md:text-3xl mb-8 leading-relaxed font-light italic">
+            The future belongs to children who have both{' '}
+            <span className="font-bold text-yellow-300 not-italic">creativity</span> and the ability to{' '}
+            <span className="font-bold text-yellow-300 not-italic">collaborate with AI</span>.
           </p>
-          <p className="text-xl md:text-2xl max-w-4xl mx-auto leading-relaxed">
-            Transform every child's original idea into tangible works, products, and opportunities to reach the market.
+          <p className="text-xl md:text-2xl max-w-4xl mx-auto leading-relaxed bg-white/10 backdrop-blur-sm rounded-2xl py-6 px-8 border-2 border-white/30 shadow-2xl">
+            <span className="font-semibold bg-gradient-to-r from-yellow-200 to-pink-200 bg-clip-text text-transparent">
+              Transform every child's original idea into tangible works, products, and opportunities to reach the market.
+            </span>
           </p>
         </div>
       </section>
