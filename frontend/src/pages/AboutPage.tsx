@@ -53,29 +53,29 @@ const AboutPage: React.FC = () => {
   const painPoints = [
     {
       icon: <MessageSquare className="w-12 h-12" />,
-      title: '想法有了，却无法表达',
-      description: '孩子们有天马行空的创意，但常常不知道怎么"说清楚"、"画出来"、"讲出来"。',
+      title: 'Ideas Without Expression',
+      description: 'Children have wild imaginations but often struggle to articulate, illustrate, or narrate their creative ideas.',
       color: 'from-blue-500 to-cyan-500'
     },
     {
       icon: <Sparkles className="w-12 h-12" />,
-      title: '工具很多，却难以整合',
-      description: 'AI工具五花八门，家长和孩子都不知道该从哪里开始。',
+      title: 'Too Many Tools, No Integration',
+      description: 'With countless AI tools available, parents and children don\'t know where to start.',
       color: 'from-purple-500 to-pink-500'
     },
     {
       icon: <Award className="w-12 h-12" />,
-      title: '有潜力，却缺少商业启蒙',
-      description: '很多家庭希望孩子能学习"创业思维"，但市面上没有适合儿童阶段的系统化训练。',
+      title: 'Potential Without Business Foundation',
+      description: 'Many families want their children to learn entrepreneurial thinking, but there\'s no systematic training designed for young learners.',
       color: 'from-orange-500 to-red-500'
     }
   ];
 
   const solutions = [
-    { icon: <MessageSquare className="w-8 h-8" />, text: '引导孩子说出他的想法', number: '1' },
-    { icon: <Palette className="w-8 h-8" />, text: '把孩子的想法画成插画', number: '2' },
-    { icon: <Music className="w-8 h-8" />, text: '鼓励孩子基于故事创作音乐', number: '3' },
-    { icon: <Film className="w-8 h-8" />, text: '把故事"拍"成微电影', number: '4' }
+    { icon: <MessageSquare className="w-8 h-8" />, text: 'Guide children to articulate their ideas', number: '1' },
+    { icon: <Palette className="w-8 h-8" />, text: 'Transform ideas into illustrations', number: '2' },
+    { icon: <Music className="w-8 h-8" />, text: 'Create music based on stories', number: '3' },
+    { icon: <Film className="w-8 h-8" />, text: 'Produce stories into short films', number: '4' }
   ];
 
   return (
@@ -84,13 +84,13 @@ const AboutPage: React.FC = () => {
       <section className="bg-gradient-to-br from-primary-600 via-purple-600 to-pink-600 text-white py-20 px-4">
         <div className="max-w-6xl mx-auto text-center">
           <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight">
-            当AI无所不能，<br />我们的孩子还能做什么？
+            When AI Can Do Everything,<br />What Can Our Children Do?
           </h1>
           <p className="text-2xl md:text-3xl mb-8 leading-relaxed">
-            未来属于那些既拥有创造力、又懂得与AI协作的孩子。
+            The future belongs to children who have both creativity and the ability to collaborate with AI.
           </p>
           <p className="text-xl md:text-2xl max-w-4xl mx-auto leading-relaxed">
-            让每一个孩子的原创想法，都能变成真实可见的作品，产品，与通往市场的机会。
+            Transform every child's original idea into tangible works, products, and opportunities to reach the market.
           </p>
         </div>
       </section>
@@ -98,7 +98,7 @@ const AboutPage: React.FC = () => {
       {/* Pain Points Section */}
       <section className="py-20 px-4 bg-gray-50">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-4xl font-bold text-center mb-16 text-gray-800">孩子们面临的挑战</h2>
+          <h2 className="text-4xl font-bold text-center mb-16 text-gray-800">Challenges Children Face</h2>
           <div className="grid md:grid-cols-3 gap-8">
             {painPoints.map((point, index) => (
               <div key={index} className="card hover:shadow-xl transition-all">
@@ -117,11 +117,11 @@ const AboutPage: React.FC = () => {
       <section className="py-20 px-4 bg-white">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold mb-6 text-gray-800">第一步</h2>
+            <h2 className="text-4xl font-bold mb-6 text-gray-800">Step One</h2>
             <h3 className="text-3xl font-bold text-primary-600 mb-4">
-              让你孩子的创意清晰"可见"
+              Make Your Child's Creativity Clearly "Visible"
             </h3>
-            <p className="text-xl text-gray-600">创作人生第一部原创作品集</p>
+            <p className="text-xl text-gray-600">Create Their First Original Portfolio</p>
           </div>
 
           <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
@@ -145,25 +145,25 @@ const AboutPage: React.FC = () => {
       {/* Stats Section */}
       <section className="py-20 px-4 bg-gradient-to-r from-primary-600 to-purple-600 text-white">
         <div className="max-w-6xl mx-auto text-center">
-          <h2 className="text-4xl font-bold mb-12">我们的成果</h2>
+          <h2 className="text-4xl font-bold mb-12">Our Impact</h2>
           <div className="grid md:grid-cols-3 gap-8">
             <div className="card bg-white/10 backdrop-blur border-white/20">
               <div className="text-6xl font-bold mb-4">3,000+</div>
-              <p className="text-xl">陪伴的孩子</p>
+              <p className="text-xl">Children Empowered</p>
             </div>
             <div className="card bg-white/10 backdrop-blur border-white/20">
               <div className="text-6xl font-bold mb-4">5,000+</div>
-              <p className="text-xl">原创作品集</p>
+              <p className="text-xl">Original Portfolios</p>
             </div>
             <div className="card bg-white/10 backdrop-blur border-white/20">
               <div className="text-6xl font-bold mb-4">100%</div>
-              <p className="text-xl">成长见证</p>
+              <p className="text-xl">Growth Witnessed</p>
             </div>
           </div>
           <p className="text-xl mt-12 leading-relaxed max-w-3xl mx-auto">
-            我们已陪伴 <span className="font-bold text-yellow-300">3000+ 位孩子</span> 创作出属于他们的原创作品，
-            累计形成 <span className="font-bold text-yellow-300">5000+ 份原创作品集</span>，
-            每一份作品，都是孩子思维与表达力的成长见证。
+            We have accompanied <span className="font-bold text-yellow-300">3,000+ children</span> in creating their original works,
+            resulting in <span className="font-bold text-yellow-300">5,000+ portfolios</span>.
+            Each piece is a testament to the growth of children's thinking and expression.
           </p>
         </div>
       </section>
@@ -172,10 +172,10 @@ const AboutPage: React.FC = () => {
       <section className="py-20 px-4 bg-gray-50">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold mb-4 text-gray-800">国际化核心团队</h2>
+            <h2 className="text-4xl font-bold mb-4 text-gray-800">International Core Team</h2>
             <div className="flex items-center justify-center gap-2 text-gray-600">
               <Globe className="w-6 h-6" />
-              <p className="text-xl">汇聚全球顶尖教育与科技人才</p>
+              <p className="text-xl">Bringing Together Top Global Education & Technology Talent</p>
             </div>
           </div>
 
@@ -193,7 +193,7 @@ const AboutPage: React.FC = () => {
 
           {/* Advisors */}
           <div className="mt-16">
-            <h3 className="text-3xl font-bold text-center mb-12 text-gray-800">顾问团队</h3>
+            <h3 className="text-3xl font-bold text-center mb-12 text-gray-800">Advisory Board</h3>
             <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
               {advisors.map((advisor, index) => (
                 <div key={index} className="card bg-gradient-to-br from-yellow-50 to-orange-50 hover:shadow-xl transition-all">
@@ -217,11 +217,11 @@ const AboutPage: React.FC = () => {
           </p>
           <div className="h-px bg-white/30 my-12 max-w-md mx-auto"></div>
           <h2 className="text-4xl md:text-5xl font-bold mb-6 bg-gradient-to-r from-yellow-300 to-pink-300 bg-clip-text text-transparent">
-            未来属于这代孩子。
+            The Future Belongs to This Generation.
           </h2>
           <p className="text-2xl md:text-3xl leading-relaxed mb-8">
-            WriteTalent让全世界看见他们的天马行空，<br />
-            助力他们创造未来！
+            WriteTalent lets the world see their imagination,<br />
+            empowering them to create the future!
           </p>
           <p className="text-xl text-gray-300">—— WriteTalent</p>
         </div>
@@ -230,7 +230,7 @@ const AboutPage: React.FC = () => {
       {/* CTA Section */}
       <section className="py-16 px-4 bg-primary-600 text-white text-center">
         <div className="max-w-4xl mx-auto">
-          <h3 className="text-3xl font-bold mb-6">准备好释放孩子的创造力了吗？</h3>
+          <h3 className="text-3xl font-bold mb-6">Ready to Unleash Your Child's Creativity?</h3>
           <p className="text-xl mb-8">Get your early access code at <a href="mailto:writetalentdev@gmail.com" className="underline hover:text-yellow-300 transition">writetalentdev@gmail.com</a></p>
         </div>
       </section>
