@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Heart, Share2 } from 'lucide-react';
 import { mockPortfolios } from '../../utils/mockData';
@@ -6,6 +6,23 @@ import { mockPortfolios } from '../../utils/mockData';
 const PortfolioDetail: React.FC = () => {
   const { id } = useParams();
   const portfolio = mockPortfolios.find(p => p.id === id);
+  
+  // 点赞状态管理
+  const [likes, setLikes] = useState(portfolio?.likes || 0);
+  const [isLiked, setIsLiked] = useState(false);
+
+  // 点赞处理函数
+  const handleLike = () => {
+    if (isLiked) {
+      // 如果已经点赞，则取消点赞
+      setLikes(likes - 1);
+      setIsLiked(false);
+    } else {
+      // 如果未点赞，则点赞
+      setLikes(likes + 1);
+      setIsLiked(true);
+    }
+  };
 
   if (!portfolio) return <div className="text-center py-20">Portfolio not found</div>;
 
@@ -29,8 +46,16 @@ const PortfolioDetail: React.FC = () => {
               <div className="text-gray-600">Originality Score</div>
             </div>
             <div className="card">
-              <button className="w-full btn-primary mb-3 flex items-center justify-center gap-2">
-                <Heart className="w-5 h-5" /> Like ({portfolio.likes})
+              <button 
+                onClick={handleLike}
+                className={`w-full mb-3 flex items-center justify-center gap-2 transition-all ${
+                  isLiked 
+                    ? 'bg-red-500 hover:bg-red-600 text-white' 
+                    : 'btn-primary'
+                } px-4 py-3 rounded-lg font-medium`}
+              >
+                <Heart className={`w-5 h-5 transition-all ${isLiked ? 'fill-current' : ''}`} /> 
+                Like ({likes})
               </button>
               <button className="w-full btn-secondary flex items-center justify-center gap-2">
                 <Share2 className="w-5 h-5" /> Share
