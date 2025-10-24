@@ -19,10 +19,9 @@ const AboutPage: React.FC = () => {
       avatar: '👩‍🏫'
     },
     {
-      name: 'Dr. Peter Kook',
-      title: 'Academic & Marketing Support',
-      description: 'Founder of education frameworks adopted by 20+ kindergartens & parenting workshops. Chairman of HK Neuro-Mental Health Center.',
-      avatar: '👨‍⚕️'
+      name: 'Larry Li, Senior AI Product Architect',
+      description: 'Drove $10M+ revenue and led 10+ technical projects from concept to deployment.',
+      avatar: '👨‍💼'
     },
     {
       name: 'Limin Xu (Sylvia Tsui)',
