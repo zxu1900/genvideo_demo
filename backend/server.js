@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
 const { pool, query } = require('./db/config');
+const { generateStoryWithAI, calculateOriginalityWithAI } = require('./services/aiService');
 require('dotenv').config();
 
 const app = express();
@@ -403,28 +404,49 @@ app.get('/api/users/:id', async (req, res) => {
 });
 
 // ============================================
-// AI Routes (mock responses)
+// AI Routes (enhanced story generation)
 // ============================================
-app.post('/api/ai/generate-story', (req, res) => {
+app.post('/api/ai/generate-story', async (req, res) => {
   const { idea, theme } = req.body;
   
-  // Mock story generation
-  setTimeout(() => {
-    const generatedStory = `Based on your idea: "${idea}", here's a wonderful story about ${theme}. 
+  if (!idea || !theme) {
+    return res.status(400).json({ 
+      error: 'Missing required fields: idea and theme' 
+    });
+  }
 
-Once upon a time, there was a young dreamer who had an amazing idea. This idea would change everything and lead to incredible adventures. The story unfolds with excitement, challenges, and ultimately triumph.
-
-Through perseverance and creativity, our hero learns valuable lessons about friendship, courage, and the power of imagination. The journey teaches us that every great story begins with a single, brilliant idea.
-
-And they all lived happily ever after, knowing that their creativity could change the world.`;
-
+  try {
+    console.log(`📝 Generating story for theme: ${theme}, idea length: ${idea.length}`);
+    
+    // 使用 DeepSeek API 生成故事
+    const generatedStory = await generateStoryWithAI(theme, idea);
+    
+    // 使用 DeepSeek API 计算原创度分数
+    const originalityScore = await calculateOriginalityWithAI(idea, generatedStory);
+    
+    console.log(`✅ Story generated, originality score: ${originalityScore}`);
+    
     res.json({ 
       success: true, 
       story: generatedStory,
-      originalityScore: Math.floor(Math.random() * 30) + 70
+      originalityScore: originalityScore,
+      metadata: {
+        theme: theme,
+        wordCount: generatedStory.length,
+        generatedAt: new Date().toISOString(),
+        aiProvider: 'deepseek'
+      }
     });
-  }, 2000); // Simulate AI processing time
+  } catch (error) {
+    console.error('❌ Story generation error:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate story. Please try again.' 
+    });
+  }
 });
+
+// Note: Local fallback functions are now in services/aiService.js
+// Kept here for backward compatibility if needed
 
 app.post('/api/ai/chat', (req, res) => {
   const { message } = req.body;

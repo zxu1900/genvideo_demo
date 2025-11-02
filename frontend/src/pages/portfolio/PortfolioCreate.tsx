@@ -4,6 +4,8 @@ import { ArrowRight, Check, Mic, Volume2, Play, Pause, Image, Music, Video, Spar
 import { themeData } from '../../utils/mockData';
 import { Theme } from '../../types';
 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+
 const PortfolioCreate: React.FC = () => {
   const [step, setStep] = useState(1);
   const [selectedTheme, setSelectedTheme] = useState<Theme | null>(null);
@@ -12,6 +14,7 @@ const PortfolioCreate: React.FC = () => {
   const [originalityScore, setOriginalityScore] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [storybookPages, setStorybookPages] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
   const [artStyle, setArtStyle] = useState('watercolor');
@@ -112,22 +115,59 @@ const PortfolioCreate: React.FC = () => {
                 </div>
               </div>
             </div>
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
+                <p className="text-red-700 text-sm">{error}</p>
+              </div>
+            )}
             <div className="flex justify-between mt-8">
               <button onClick={() => setStep(1)} className="btn-secondary">Back</button>
               <button 
-                onClick={() => { 
+                onClick={async () => { 
                   setIsGenerating(true);
-                  setTimeout(() => {
-                    setStory('Generated story based on: ' + idea);
-                    setIsGenerating(false);
+                  setError(null);
+                  
+                  try {
+                    const response = await fetch(`${API_URL}/api/ai/generate-story`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        idea: idea,
+                        theme: selectedTheme
+                      }),
+                    });
+                    
+                    if (!response.ok) {
+                      throw new Error('Failed to generate story');
+                    }
+                    
+                    const data = await response.json();
+                    setStory(data.story);
+                    setOriginalityScore(data.originalityScore);
                     setStep(3);
-                  }, 2000);
+                  } catch (err) {
+                    console.error('Story generation error:', err);
+                    setError('Failed to generate story. Please try again.');
+                  } finally {
+                    setIsGenerating(false);
+                  }
                 }} 
                 disabled={!idea || isGenerating} 
-                className="btn-primary"
+                className="btn-primary flex items-center"
               >
-                {isGenerating ? 'Generating...' : 'Next: Generate Story'} 
-                <ArrowRight className="ml-2" />
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                    Generating Story...
+                  </>
+                ) : (
+                  <>
+                    Next: Generate Story
+                    <ArrowRight className="ml-2" />
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -135,44 +175,107 @@ const PortfolioCreate: React.FC = () => {
       case 3:
         return (
           <div className="max-w-6xl mx-auto">
-            <h2 className="text-4xl font-bold text-center mb-12">Your Story</h2>
+            <h2 className="text-4xl font-bold text-center mb-8">✨ Your Story is Ready!</h2>
+            <p className="text-center text-gray-600 mb-8">Step 3/6 - Review and edit your generated story</p>
+            
             {isGenerating ? (
               <div className="text-center py-20">
                 <div className="animate-spin w-16 h-16 border-4 border-primary-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-                <h3 className="text-2xl font-bold mb-2">Generating your story...</h3>
-                <p className="text-gray-600">Our AI is crafting an amazing story based on your idea!</p>
+                <h3 className="text-2xl font-bold mb-2">🎨 Crafting your story...</h3>
+                <p className="text-gray-600">Our AI children's writer is creating an amazing story based on your idea!</p>
               </div>
             ) : (
               <>
+                {/* Originality Score Banner */}
+                <div className="card bg-gradient-to-r from-primary-500 to-secondary-500 text-white text-center mb-8">
+                  <div className="flex items-center justify-center gap-8">
+                    <div>
+                      <div className="text-6xl font-bold">{originalityScore}</div>
+                      <div className="text-lg opacity-90">Originality Score</div>
+                    </div>
+                    <div className="text-left">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Sparkles className="w-6 h-6" />
+                        <span className="text-xl font-semibold">
+                          {originalityScore >= 90 ? '🌟 Exceptional!' : 
+                           originalityScore >= 80 ? '✨ Excellent!' : 
+                           originalityScore >= 70 ? '💫 Great!' : 
+                           '⭐ Good!'}
+                        </span>
+                      </div>
+                      <p className="text-sm opacity-90">
+                        {originalityScore >= 90 ? 'Your idea is extraordinarily creative and unique!' : 
+                         originalityScore >= 80 ? 'Your story shows impressive originality!' : 
+                         originalityScore >= 70 ? 'Your story has wonderful creative elements!' : 
+                         'Your story has good creative potential!'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid md:grid-cols-2 gap-6">
                   <div className="card bg-gray-50">
-                    <h3 className="font-bold mb-4">Your Original Idea</h3>
-                    <p className="text-gray-700">{idea}</p>
+                    <h3 className="font-bold mb-4 flex items-center gap-2">
+                      <span className="text-2xl">💡</span>
+                      Your Original Idea
+                    </h3>
+                    <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">{idea}</p>
                   </div>
                   <div className="card">
-                    <h3 className="font-bold mb-4">Generated Story</h3>
+                    <h3 className="font-bold mb-4 flex items-center gap-2">
+                      <span className="text-2xl">📖</span>
+                      Generated Story
+                    </h3>
                     <textarea
                       value={story}
                       onChange={(e) => setStory(e.target.value)}
-                      className="w-full h-64 p-4 rounded-lg border focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                      className="w-full h-64 p-4 rounded-lg border focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none leading-relaxed"
                       placeholder="Your AI-generated story will appear here..."
                     />
+                    <p className="text-sm text-gray-500 mt-2">
+                      You can edit the story above to make it perfect!
+                    </p>
                   </div>
                 </div>
                 <div className="flex justify-between mt-8">
                   <button onClick={() => setStep(2)} className="btn-secondary">Back</button>
                   <div className="space-x-4">
                     <button 
-                      onClick={() => {
+                      onClick={async () => {
                         setIsGenerating(true);
-                        setTimeout(() => {
-                          setStory('Regenerated story based on: ' + idea + '\n\nThis is a new version of your story with fresh ideas and creative twists!');
+                        setError(null);
+                        
+                        try {
+                          const response = await fetch(`${API_URL}/api/ai/generate-story`, {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                              idea: idea,
+                              theme: selectedTheme
+                            }),
+                          });
+                          
+                          if (!response.ok) {
+                            throw new Error('Failed to regenerate story');
+                          }
+                          
+                          const data = await response.json();
+                          setStory(data.story);
+                          setOriginalityScore(data.originalityScore);
+                        } catch (err) {
+                          console.error('Story regeneration error:', err);
+                          setError('Failed to regenerate story. Please try again.');
+                        } finally {
                           setIsGenerating(false);
-                        }, 2000);
+                        }
                       }}
-                      className="btn-secondary"
+                      className="btn-secondary flex items-center gap-2"
+                      disabled={isGenerating}
                     >
-                      Regenerate
+                      <RefreshCw className={`w-5 h-5 ${isGenerating ? 'animate-spin' : ''}`} />
+                      {isGenerating ? 'Regenerating...' : 'Regenerate'}
                     </button>
                     <button 
                       onClick={() => {
