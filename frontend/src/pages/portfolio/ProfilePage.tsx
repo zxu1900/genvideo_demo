@@ -1,11 +1,53 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { mockUsers, mockPortfolios } from '../../utils/mockData';
+import type { User, Portfolio } from '../../types';
+
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 const ProfilePage: React.FC = () => {
   const { userId } = useParams();
-  const user = mockUsers.find(u => u.id === userId);
-  const userWorks = mockPortfolios.filter(p => p.userId === userId);
+  const [user, setUser] = useState<User | null>(null);
+  const [userWorks, setUserWorks] = useState<Portfolio[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!userId) return;
+
+      try {
+        setLoading(true);
+        
+        // Fetch user info
+        const userResponse = await fetch(`${API_URL}/api/users/${userId}`);
+        if (userResponse.ok) {
+          const userData = await userResponse.json();
+          setUser(userData);
+        }
+
+        // Fetch user's portfolios
+        const portfoliosResponse = await fetch(`${API_URL}/api/portfolios`);
+        if (portfoliosResponse.ok) {
+          const portfolios = await portfoliosResponse.json();
+          setUserWorks(portfolios.filter((p: Portfolio) => p.userId === userId));
+        }
+      } catch (err) {
+        console.error('Error fetching user data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUserData();
+  }, [userId]);
+
+  if (loading) {
+    return (
+      <div className="text-center py-20">
+        <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-600"></div>
+        <p className="mt-4 text-gray-600">Loading profile...</p>
+      </div>
+    );
+  }
 
   if (!user) return <div className="text-center py-20">User not found</div>;
 

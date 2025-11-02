@@ -1,16 +1,44 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Heart, Eye, Search, Filter, Star, Clock, TrendingUp, ChevronDown } from 'lucide-react';
-import { mockPortfolios, themeData } from '../../utils/mockData';
+import { themeData } from '../../utils/mockData';
+import type { Portfolio } from '../../types';
+
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 const ShowYourLights: React.FC = () => {
-  const [portfolios] = useState(mockPortfolios);
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<string>('all');
   const [selectedAge, setSelectedAge] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('latest');
   const [searchQuery, setSearchQuery] = useState('');
   const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
   const themeDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Fetch portfolios from backend API
+  useEffect(() => {
+    const fetchPortfolios = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`${API_URL}/api/portfolios`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch portfolios');
+        }
+        const data = await response.json();
+        setPortfolios(data);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching portfolios:', err);
+        setError('Failed to load portfolios. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPortfolios();
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -60,6 +88,25 @@ const ShowYourLights: React.FC = () => {
           </h1>
           <p className="text-xl text-gray-600">Discover amazing stories from young creators</p>
         </div>
+
+        {/* Loading State */}
+        {loading && (
+          <div className="text-center py-20">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-600"></div>
+            <p className="mt-4 text-gray-600">Loading portfolios...</p>
+          </div>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-8">
+            <p className="text-red-700">{error}</p>
+          </div>
+        )}
+
+        {/* Content */}
+        {!loading && !error && (
+          <>
 
         {/* Filters */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
@@ -171,9 +218,9 @@ const ShowYourLights: React.FC = () => {
             <Link key={portfolio.id} to={`/portfolio/${portfolio.id}`} className="card group hover:scale-105 transition-all duration-300 hover:shadow-xl">
               {/* Cover Image */}
               <div className="relative h-48 bg-gradient-to-br from-primary-100 to-secondary-100 rounded-lg mb-4 overflow-hidden">
-                {portfolio.storybook?.pages[0]?.illustration ? (
+                {(portfolio.videoMetadata?.thumbnail || portfolio.storybook?.pages?.[0]?.illustration) ? (
                   <img 
-                    src={portfolio.storybook.pages[0].illustration} 
+                    src={portfolio.videoMetadata?.thumbnail || portfolio.storybook?.pages?.[0]?.illustration || ''} 
                     alt={portfolio.title} 
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" 
                   />
@@ -240,6 +287,8 @@ const ShowYourLights: React.FC = () => {
               Create the First Story
             </Link>
           </div>
+        )}
+        </>
         )}
       </div>
     </div>

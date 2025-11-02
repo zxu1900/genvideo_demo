@@ -36,6 +36,14 @@ export interface Portfolio {
   };
   music?: string; // URL or ID
   video?: string; // URL or ID
+  videoMetadata?: {
+    youtube_id?: string;
+    duration?: number;
+    view_count?: number;
+    thumbnail?: string;
+    upload_date?: string;
+    creator_location?: string;
+  };
   originalityScore: number;
   likes: number;
   likedBy: string[];
