@@ -1,0 +1,732 @@
+{
+  "name": "story_final",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "story_final",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -1376,
+        288
+      ],
+      "id": "81f5dafe-d5cb-48e1-93f5-91aa7485a0c8",
+      "name": "接收分镜"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "# 解析从Webhook接收到的分镜数据\nimport json\nfrom datetime import datetime\n\nitem = items[0].get('json', {})\nbody = item.get('body') or {}\nscenes = body.get('scenes')\n\nif scenes is None:\n    raise Exception('请求体缺少scenes字段')\n\nif isinstance(scenes, str):\n    try:\n        scenes = json.loads(scenes)\n    except Exception as e:\n        raise Exception(f'scenes字段不是有效的JSON字符串: {str(e)}')\n\nif isinstance(scenes, dict) and 'scenes' in scenes:\n    scenes = scenes['scenes']\n\nif not isinstance(scenes, list):\n    raise Exception('scenes字段必须是数组')\n\ntotal_scenes = len(scenes)\nif total_scenes == 0:\n    raise Exception('scenes数组不能为空')\n\noriginal_story = body.get('original_story') or body.get('story') or body.get('storyInput') or ''\n\nprocessed_items = []\nfor index, scene in enumerate(scenes):\n    if not isinstance(scene, dict):\n        raise Exception(f'第 {index + 1} 个分镜数据格式错误')\n\n    duration = scene.get('duration', 0)\n    try:\n        duration = int(duration)\n    except Exception:\n        duration = 0\n\n    if duration > 8:\n        duration = 8\n        print(f\"场景 {scene.get('scene_id', index + 1)} 时长超过8秒，已调整为8秒\")\n\n    audio_script = scene.get('audio_script') or scene.get('subtitle') or ''\n    subtitle = scene.get('subtitle') or audio_script\n    video_prompt = scene.get('video_prompt') or ''\n\n    processed_scene = {\n        **scene,\n        'scene_id': scene.get('scene_id') or index + 1,\n        'duration': duration,\n        'audio_script': audio_script,\n        'subtitle': subtitle,\n        'video_prompt': video_prompt,\n        'scene_index': index,\n        'original_story': original_story,\n        'total_scenes': total_scenes,\n        'timestamp': datetime.now().isoformat()\n    }\n\n    processed_items.append({'json': processed_scene})\n\nprint(f'接收到 {total_scenes} 个分镜')\nreturn processed_items\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1072,
+        288
+      ],
+      "id": "ba9db63b-3599-4865-82e8-3a12c1d0bf1d",
+      "name": "解析分镜输入"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        288
+      ],
+      "id": "7b424874-f0c6-4fc8-b28d-8867e68ee3a6",
+      "name": "分镜循环"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://comfyui_api:8001/api/audio/speech",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "=json",
+        "specifyBody": "json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"input\": \"{{ $json.audio_script }}\",\n  \"sync\": false\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -224,
+        48
+      ],
+      "id": "edb225c7-7253-418f-ae58-4fc8212e8c63",
+      "name": "提交音频生成",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://comfyui_api:8001/api/video/submit",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "=json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"prompt\": \"{{ $json.video_prompt }}\",\n  \"duration\":{{ $json.duration }},\n  \"sync\": false\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -224,
+        640
+      ],
+      "id": "50a58981-5ffc-4945-8f5e-ec585d0487fb",
+      "name": "提交视频生成",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        224,
+        272
+      ],
+      "id": "f39975a2-bba1-4ec4-866a-8484089f1aea",
+      "name": "合并音频视频场景"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# 准备等待音频和视频生成完成的数据\nimport json\nfrom datetime import datetime\n\nall_inputs = items\nprint(f\"收到 {len(all_inputs)} 个输入\")\n\n# 分离不同类型的数据\naudio_prompt_id = None\nvideo_prompt_id = None\nscene_data = None\n\nfor i, item in enumerate(all_inputs):\n    data = item.get('json', {})\n    print(f\"输入 {i+1}: 键 = {list(data.keys())[:5]}...\")\n    \n    # 识别数据类型\n    if 'audio_prompt_id' in data and 'video_prompt_id' in data and 'scene_id' in data:\n      audio_prompt_id = data[\"audio_prompt_id\"]\n      video_prompt_id = data[\"video_prompt_id\"]\n      scene_data = data\n    elif 'audio_prompt_id' in data:\n      audio_prompt_id = data[\"audio_prompt_id\"]\n    elif 'video_prompt_id' in data:\n      video_prompt_id = data[\"video_prompt_id\"]\n    elif 'scvalue' in data:\n        scene_data = data[\"scvalue\"]\n        print(\"识别为场景数据\")\n\n        \n\n# 验证必要数据\nif scene_data is None:\n    raise Exception('未找到场景数据，无法继续处理')\n\nprint(f\"音频prompt_id: {audio_prompt_id}\")\nprint(f\"视频prompt_id: {video_prompt_id}\")\nprint(f\"场景ID: {scene_data.get('scene_id')}\")\n\n\n# 准备等待数据，包含完整的场景信息\nwait_data = {\n    # API响应数据\n    'audio_prompt_id': audio_prompt_id,\n    'video_prompt_id': video_prompt_id,\n    \n    # 完整的场景数据\n    'scene_id': scene_data.get('scene_id', 0),\n    'scene_index': scene_data.get('scene_index', 0),\n    'total_scenes': scene_data.get('total_scenes', 1),\n    'original_story': scene_data.get('original_story', ''),\n    'duration': scene_data.get('duration', 0),\n    'audio_script': scene_data.get('audio_script', ''),\n    'subtitle': scene_data.get('subtitle', ''),\n    'video_prompt': scene_data.get('video_prompt', ''),\n    \n    # 状态控制\n    'audio_ready': False,\n    'video_ready': False,\n    'ready_for_fusion': False,\n    'max_retries': 40,\n    'current_retry': 0,\n    'retry_interval': 10000,\n    'timestamp': datetime.now().isoformat()\n}\n\nprint(f\"准备等待场景 {wait_data['scene_id']} 的音频和视频生成完成\")\nprint(f\"场景数据完整性: 音频脚本={bool(wait_data['audio_script'])}, 字幕={bool(wait_data['subtitle'])}, 视频提示={bool(wait_data['video_prompt'])}\")\n\nreturn [{'json': wait_data}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        288
+      ],
+      "id": "e4825efc-a60a-4b84-93e6-dfe356e8309d",
+      "name": "准备等待数据"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://comfyui_api:8001/api/audio/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"request_id\": \"{{ $json.audio_prompt_id }}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        736,
+        48
+      ],
+      "id": "0f77acb7-c3e2-41ce-b787-799533a16722",
+      "name": "检查音频状态",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://comfyui_api:8001/api/video/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "=json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"request_id\": \"{{ $json.video_prompt_id}}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        752,
+        512
+      ],
+      "id": "88399851-0721-4db3-a94d-44089c0aa05d",
+      "name": "检查视频状态",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1024,
+        288
+      ],
+      "id": "0e97778b-a0b7-4a62-a700-5dbe4d5841a5",
+      "name": "合并状态检查"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# 检查音频和视频生成状态\nimport json\nfrom datetime import datetime\n\nall_inputs = items\naudio_status = None\nvideo_status = None\nscene_data = None\n\nprint(f\"收到 {len(all_inputs)} 个输入项\")\n\n\n\nfor i, item in enumerate(all_inputs):\n    data = item.get('json', {})\n    print(f\"输入 {i+1}: 键 = {list(data.keys())[:5]}\")\n    \n    if 'status' in data and ('audio_data' in data):\n        audio_status = data\n        print(f\"识别为音频状态: {data.get('status')}\")\n    elif 'status' in data and ('video_data' in data):\n        video_status = data\n        print(f\"识别为视频状态: {data.get('status')}\")\n    elif 'scene_id' in data:\n        scene_data = data\n        print(f\"识别为场景数据: scene_id={data.get('scene_id')}\")\n\nif scene_data is None:\n    raise Exception('未找到场景数据，无法继续处理')\n\nif audio_status is None or video_status is None:\n    raise Exception('音频或视频状态数据不完整，无法继续处理')\n\naudio_completed = audio_status.get('status') in ['success', 'completed', 'Succeed']\nvideo_completed = video_status.get('status') in ['success', 'completed', 'Succeed']\n\naudio_failed = audio_status.get('status') in ['failed', 'error', 'Failed']\nvideo_failed = video_status.get('status') in ['failed', 'error', 'Failed']\n\ncurrent_retry = scene_data.get('current_retry', 0)\nmax_retries = scene_data.get('max_retries', 40)\n\nprint(f\"音频状态: {audio_status.get('status')}, 完成: {audio_completed}\")\nprint(f\"视频状态: {video_status.get('status')}, 完成: {video_completed}\")\n\nif audio_failed or video_failed:\n    error_msg = f\"生成失败 - 音频: {audio_status.get('status')}, 视频: {video_status.get('status')}\"\n    raise Exception(error_msg)\n\nif audio_completed and video_completed:\n    # 两者都完成，准备融合\n    audio_url = audio_status.get('audio_url', '')\n    \n    video_url = ''\n    if 'results' in video_status:\n        results = video_status['results']\n        if 'videos' in results and results['videos']:\n            video_url = results['videos'][0].get('url', '')\n    \n    # 创建包含完整场景数据的结果\n    result = dict(scene_data)\n    result.update({\n        'audio_url': audio_url,\n        'video_url': video_url,\n        'audio_ready': True,\n        'video_ready': True,\n        'ready_for_fusion': True,\n        'message': '音频和视频生成完成，准备融合',\n        'timestamp': datetime.now().isoformat()\n    })\n    \n    print(f\"场景 {result['scene_id']} 音频和视频生成完成\")\n    print(f\"场景数据完整: 音频脚本={bool(result.get('audio_script'))}, 字幕={bool(result.get('subtitle'))}\")\n    return [{'json': result}]\n    \nelif current_retry < max_retries:\n    next_retry = current_retry + 1\n    \n    result = dict(scene_data)\n    result.update({\n        'current_retry': next_retry,\n        'audio_ready': audio_completed,\n        'video_ready': video_completed,\n        'ready_for_fusion': False,\n        'message': f'等待生成完成... ({next_retry}/{max_retries}) - 音频:{\"完成\" if audio_completed else \"处理中\"}, 视频:{\"完成\" if video_completed else \"处理中\"}',\n        'timestamp': datetime.now().isoformat()\n    })\n    \n    print(f\"场景 {result['scene_id']} 继续等待... ({next_retry}/{max_retries})\")\n    return [{'json': result}]\nelse:\n    raise Exception(f\"生成超时: {max_retries} 次重试后仍未完成\")"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        288
+      ],
+      "id": "148b5d4f-b34f-4aac-8aca-79dea18c452e",
+      "name": "处理状态"
+    },
+    {
+      "parameters": {
+        "amount": "=30",
+        "unit": "seconds"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1632,
+        512
+      ],
+      "id": "de50f36e-efe7-4f01-9ac3-da76022f6c9c",
+      "name": "等待重试",
+      "webhookId": "096aee91-84ee-4bcd-9e05-1f0908255e7b"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://fusion_api:8002/api/fusion",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "=json",
+        "specifyBody": "json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"audio_url\": \"{{ $json.audio_url }}\",\n  \"video_url\": \"{{ $json.video_url }}\",\n  \"subtitle\": \"{{ $json.subtitle }}\",\n  \"scene_id\": {{ $json.scene_id }},\n  \"duration\": {{ $json.duration }}\n}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1936,
+        288
+      ],
+      "id": "2161bce3-adab-4922-acdb-5b1b24ba8911",
+      "name": "提交融合任务"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://comfyui_api:8001/api/video/merge",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"fusion_video_urls\": {{ JSON.stringify($json.fusion_video_urls) }},\n  \"output_filename\": \"final_story_video_{{$json.timestamp}}\",\n  \"story_title\": \"title\"\n}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -176,
+        960
+      ],
+      "id": "f36e651c-2b86-4cab-baaa-932e72302c6a",
+      "name": "合并最终视频"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3c04d6f6-3820-40b5-a9a8-f1a2802aab1b",
+              "name": "audio_prompt_id",
+              "value": "={{ $json.prompt_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "28597c16-29d9-4fe6-bef8-020aef7d0793",
+      "name": "audio_config"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8d3133b0-46a3-4e13-b0ed-9912e0a2fa66",
+              "name": "video_prompt_id",
+              "value": "={{ $json.prompt_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        32,
+        736
+      ],
+      "id": "8d222ff0-6ed2-4984-b994-b96d774f9fae",
+      "name": "video_config"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "01b56dbf-5be4-4d91-87d1-26e9b29559e2",
+              "name": "scvalue",
+              "value": "={{ $json }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -144,
+        304
+      ],
+      "id": "fa54acee-7ff2-4939-973e-f6780a5b272e",
+      "name": "sc_config"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor item in _input.all():\n  data = dict(item.json)\n  #data.pop('audio_prompt_id', None)  # None是默认值，如果key不存在不会报错\n  #data.pop('video_prompt_id', None)\n  return {\"json\": data}\nreturn None"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        288
+      ],
+      "id": "476a4dff-df34-426e-bf82-8063b5650fac",
+      "name": "Code in Python (Beta)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8a683cd6-626c-4f5c-a593-7d68b25c2158",
+              "leftValue": "={{ $json.ready_for_fusion }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1632,
+        288
+      ],
+      "id": "51f5f27f-af2a-40a6-ae02-2ae197b68c8a",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# 收集所有分镜的处理结果并准备合并\nimport json\nfrom datetime import datetime\n\nall_results = [item['json'] for item in items]\n\nif not all_results:\n    raise Exception('没有接收到分镜处理结果')\n\n# 收集所有task_id和其他字段\ntask_ids = []\nfusion_video_urls = []\nscene_ids = []\nsubtitles = []\n\nfor result in all_results:\n    # 收集task_id\n    task_id = result.get('task_id', '')\n    if task_id:\n        task_ids.append(task_id)\n    \n    # 收集fusion_video_url\n    if task_id:\n        fusion_url = f\"http://fusion_api:8002/api/fusion/download/{task_id}\"\n        fusion_video_urls.append(fusion_url)\n    \n    # 收集scene_id\n    scene_id = result.get('scene_id')\n    if scene_id:\n        scene_ids.append(scene_id)\n    \n    # 收集subtitle\n    subtitle = result.get('subtitle')\n    if subtitle:\n        subtitles.append(subtitle)\n\nprint(f\"收集到 {len(task_ids)} 个task_id\")\nprint(f\"收集到 {len(fusion_video_urls)} 个fusion_video_url\")\nprint(f\"收集到 {len(scene_ids)} 个scene_id\")\nprint(f\"收集到 {len(subtitles)} 个subtitle\")\n\n# 构建汇总结果\nsummary = {\n    'task_ids': task_ids,\n    'fusion_video_urls': fusion_video_urls,\n    'scene_ids': scene_ids,\n    'subtitles': subtitles,\n    'total_scenes': len(all_results),\n    'timestamp': datetime.now().isoformat()\n}\n\nprint(f\"准备合并 {len(fusion_video_urls)} 个视频\")\n\nreturn [{'json': summary}]\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        960
+      ],
+      "id": "2014c652-fc6c-48b7-a53b-2d1d49820e22",
+      "name": "最终汇总1"
+    },
+    {
+      "parameters": {
+        "amount": "=30",
+        "unit": "seconds"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        2112,
+        288
+      ],
+      "id": "af9e7a39-1f1a-469f-9b83-a9c34d612fa3",
+      "name": "等待重试1",
+      "webhookId": "096aee91-84ee-4bcd-9e05-1f0908255e7b"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "分镜循环": {
+      "main": [
+        [
+          {
+            "node": "提交音频生成",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "提交视频生成",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "sc_config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "最终汇总1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "提交音频生成": {
+      "main": [
+        [
+          {
+            "node": "audio_config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "提交视频生成": {
+      "main": [
+        [
+          {
+            "node": "video_config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "合并音频视频场景": {
+      "main": [
+        [
+          {
+            "node": "准备等待数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "准备等待数据": {
+      "main": [
+        [
+          {
+            "node": "检查音频状态",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "检查视频状态",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in Python (Beta)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "检查音频状态": {
+      "main": [
+        [
+          {
+            "node": "合并状态检查",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "检查视频状态": {
+      "main": [
+        [
+          {
+            "node": "合并状态检查",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "合并状态检查": {
+      "main": [
+        [
+          {
+            "node": "处理状态",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "处理状态": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "等待重试": {
+      "main": [
+        [
+          {
+            "node": "准备等待数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "提交融合任务": {
+      "main": [
+        [
+          {
+            "node": "等待重试1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "audio_config": {
+      "main": [
+        [
+          {
+            "node": "合并音频视频场景",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "video_config": {
+      "main": [
+        [
+          {
+            "node": "合并音频视频场景",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "sc_config": {
+      "main": [
+        [
+          {
+            "node": "合并音频视频场景",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Code in Python (Beta)": {
+      "main": [
+        [
+          {
+            "node": "合并状态检查",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "提交融合任务",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "等待重试",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "等待重试1": {
+      "main": [
+        [
+          {
+            "node": "分镜循环",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "最终汇总1": {
+      "main": [
+        [
+          {
+            "node": "合并最终视频",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "接收分镜": {
+      "main": [
+        [
+          {
+            "node": "解析分镜输入",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析分镜输入": {
+      "main": [
+        [
+          {
+            "node": "分镜循环",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "313ba9b4-8bd4-4d4b-920f-de96cee6a35c",
+  "meta": {
+    "instanceId": "e74792ac9ef8eb1050ebd0e8783b906ede08d32380491e5800b5b75b1e219fa7"
+  },
+  "id": "SaBAPukdR3MNrC5l",
+  "tags": []
+}
