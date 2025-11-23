@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { KeyRound, AlertCircle, CheckCircle } from 'lucide-react';
+import { buildApiUrl } from '../../utils/api';
 
 const ForgotPasswordPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -32,7 +33,7 @@ const ForgotPasswordPage: React.FC = () => {
 
     // Call real backend API to send verification code
     try {
-      const response = await fetch('http://localhost:3001/api/auth/send-verification-code', {
+      const response = await fetch(buildApiUrl('/api/auth/send-verification-code'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -84,7 +85,7 @@ const ForgotPasswordPage: React.FC = () => {
 
     // Call real backend API to reset password
     try {
-      const response = await fetch('http://localhost:3001/api/auth/reset-password', {
+      const response = await fetch(buildApiUrl('/api/auth/reset-password'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

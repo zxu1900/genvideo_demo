@@ -3,8 +3,7 @@ import { Link } from 'react-router-dom';
 import { Heart, Eye, Search, Filter, Star, Clock, TrendingUp, ChevronDown } from 'lucide-react';
 import { themeData } from '../../utils/mockData';
 import type { Portfolio } from '../../types';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { buildApiUrl } from '../../utils/api';
 
 const ShowYourLights: React.FC = () => {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
@@ -22,7 +21,7 @@ const ShowYourLights: React.FC = () => {
     const fetchPortfolios = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${API_URL}/api/portfolios`);
+        const response = await fetch(buildApiUrl('/api/portfolios'));
         if (!response.ok) {
           throw new Error('Failed to fetch portfolios');
         }

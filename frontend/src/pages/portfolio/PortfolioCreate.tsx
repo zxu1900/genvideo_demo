@@ -1,16 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, Mic, Volume2, Play, Pause, Image, Music, Video, Sparkles, RefreshCw, Layout, Wand2, SkipForward, Loader2, Film, Settings, Clock } from 'lucide-react';
 import { themeData } from '../../utils/mockData';
-import { Theme } from '../../types';
+import { StoryScene, Theme } from '../../types';
+import { buildApiUrl } from '../../utils/api';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+type ImageJobStatus = 'idle' | 'queued' | 'running' | 'completed' | 'completed_with_errors' | 'failed';
 
 const PortfolioCreate: React.FC = () => {
   const [step, setStep] = useState(1);
   const [selectedTheme, setSelectedTheme] = useState<Theme | null>(null);
   const [idea, setIdea] = useState('');
   const [story, setStory] = useState('');
+  const [scenes, setScenes] = useState<StoryScene[]>([]);
   const [originalityScore, setOriginalityScore] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -25,7 +27,174 @@ const PortfolioCreate: React.FC = () => {
   const [videoLength, setVideoLength] = useState('2');
   const [transition, setTransition] = useState('fade');
   const [voiceType, setVoiceType] = useState('child');
+  const [videoTaskId, setVideoTaskId] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const videoTaskPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [imageJobId, setImageJobId] = useState<string | null>(null);
+  const [imageJobStatus, setImageJobStatus] = useState<ImageJobStatus>('idle');
+  const [imageJobError, setImageJobError] = useState<string | null>(null);
+  const [isRefreshingImages, setIsRefreshingImages] = useState(false);
+  const [lastImageRefreshAt, setLastImageRefreshAt] = useState<number | null>(null);
+  const imageJobPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const navigate = useNavigate();
+
+  const clearImageJobPolling = useCallback(() => {
+    if (imageJobPollRef.current) {
+      clearInterval(imageJobPollRef.current);
+      imageJobPollRef.current = null;
+    }
+  }, []);
+
+  const clearVideoTaskPolling = useCallback(() => {
+    if (videoTaskPollRef.current) {
+      clearInterval(videoTaskPollRef.current);
+      videoTaskPollRef.current = null;
+    }
+  }, []);
+
+  const fetchVideoTaskStatus = useCallback(async () => {
+    if (!videoTaskId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(buildApiUrl(`/api/drama/task/${videoTaskId}`), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch video task status');
+      }
+
+      const data = await response.json();
+      const task = data.task;
+
+      console.log(`🎬 Video task ${videoTaskId} status:`, task.status, `progress: ${task.progress}%`);
+
+      if (task.status === 'completed' && task.result?.videoUrl) {
+        setVideoUrl(task.result.videoUrl);
+        setVideoProgress(100);
+        setIsGeneratingVideo(false);
+        clearVideoTaskPolling();
+        console.log('✅ Video generation completed:', task.result.videoUrl);
+      } else if (task.status === 'failed') {
+        setError(task.error || 'Video generation failed');
+        setIsGeneratingVideo(false);
+        clearVideoTaskPolling();
+        console.error('❌ Video generation failed:', task.error);
+      } else if (task.status === 'running' || task.status === 'queued') {
+        // Update progress (estimate based on status)
+        const estimatedProgress = task.progress || (task.status === 'running' ? 50 : 10);
+        setVideoProgress(estimatedProgress);
+      }
+    } catch (err) {
+      console.error('❌ Failed to fetch video task status:', err);
+    }
+  }, [videoTaskId, clearVideoTaskPolling]);
+
+  const fetchImageJobStatus = useCallback(async (silent = false) => {
+    if (!imageJobId) {
+      return;
+    }
+
+    if (!silent) {
+      setIsRefreshingImages(true);
+    }
+
+    try {
+      const response = await fetch(buildApiUrl(`/api/ai/image-jobs/${imageJobId}`), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          clearImageJobPolling();
+          setImageJobStatus('failed');
+          setImageJobError('Image generation job not found or has expired. Please regenerate the story to request new images.');
+          return;
+        }
+
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to fetch image job status');
+      }
+
+      const data = await response.json();
+      const nextStatus = (data.status as ImageJobStatus) || 'idle';
+
+      setScenes(Array.isArray(data.scenes) ? data.scenes : []);
+      setImageJobStatus(nextStatus);
+      setImageJobError(data.lastError || null);
+      setLastImageRefreshAt(Date.now());
+
+      if (['completed', 'completed_with_errors', 'failed'].includes(nextStatus)) {
+        clearImageJobPolling();
+      }
+    } catch (err) {
+      console.error('Image job polling error:', err);
+      if (!silent) {
+        setImageJobError(err instanceof Error ? err.message : 'Failed to refresh storyboard images.');
+      }
+    } finally {
+      if (!silent) {
+        setIsRefreshingImages(false);
+      }
+    }
+  }, [imageJobId, clearImageJobPolling]);
+
+  useEffect(() => () => {
+    clearImageJobPolling();
+    clearVideoTaskPolling();
+  }, [clearImageJobPolling, clearVideoTaskPolling]);
+
+  useEffect(() => {
+    if (step !== 3 || !imageJobId) {
+      clearImageJobPolling();
+      return undefined;
+    }
+
+    fetchImageJobStatus(true);
+
+    const intervalId = setInterval(() => {
+      fetchImageJobStatus(true);
+    }, 5000);
+
+    imageJobPollRef.current = intervalId;
+
+    return () => {
+      clearInterval(intervalId);
+      if (imageJobPollRef.current === intervalId) {
+        imageJobPollRef.current = null;
+      }
+    };
+  }, [step, imageJobId, fetchImageJobStatus, clearImageJobPolling]);
+
+  useEffect(() => {
+    if (step !== 6 || !videoTaskId) {
+      clearVideoTaskPolling();
+      return undefined;
+    }
+
+    fetchVideoTaskStatus();
+
+    const intervalId = setInterval(() => {
+      fetchVideoTaskStatus();
+    }, 5000);
+
+    videoTaskPollRef.current = intervalId;
+
+    return () => {
+      clearInterval(intervalId);
+      if (videoTaskPollRef.current === intervalId) {
+        videoTaskPollRef.current = null;
+      }
+    };
+  }, [step, videoTaskId, fetchVideoTaskStatus, clearVideoTaskPolling]);
 
   const renderStep = () => {
     switch (step) {
@@ -120,32 +289,66 @@ const PortfolioCreate: React.FC = () => {
                 <p className="text-red-700 text-sm">{error}</p>
               </div>
             )}
-            <div className="flex justify-between mt-8">
-              <button onClick={() => setStep(1)} className="btn-secondary">Back</button>
+                <div className="flex justify-between items-center mt-8">
+              <button
+                onClick={() => {
+                  clearImageJobPolling();
+                  setStep(1);
+                  setStory('');
+                  setScenes([]);
+                  setImageJobId(null);
+                  setImageJobStatus('idle');
+                  setImageJobError(null);
+                  setLastImageRefreshAt(null);
+                }}
+                className="btn-secondary"
+              >
+                Back
+              </button>
               <button 
                 onClick={async () => { 
                   setIsGenerating(true);
                   setError(null);
+                  clearImageJobPolling();
+                  setImageJobId(null);
+                  setImageJobStatus('idle');
+                  setImageJobError(null);
+                  setLastImageRefreshAt(null);
                   
                   try {
-                    const response = await fetch(`${API_URL}/api/ai/generate-story`, {
+                    const requestBody = {
+                      idea: idea,
+                      theme: selectedTheme,
+                    };
+                    console.log('🚀 Requesting story generation:', requestBody);
+
+                    const response = await fetch(buildApiUrl('/api/ai/generate-story'), {
                       method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
                       },
-                      body: JSON.stringify({
-                        idea: idea,
-                        theme: selectedTheme
-                      }),
+                      body: JSON.stringify(requestBody),
                     });
                     
                     if (!response.ok) {
+                      const errorText = await response.text();
+                      console.error('❌ Story request failed:', response.status, errorText);
                       throw new Error('Failed to generate story');
                     }
                     
                     const data = await response.json();
-                    setStory(data.story);
-                    setOriginalityScore(data.originalityScore);
+                    console.log('✅ Story response received:', data);
+                    const receivedScenes: StoryScene[] = data.scenes || [];
+                    setScenes(receivedScenes);
+                    const combinedStory = data.story || receivedScenes.map(scene => scene.story).join('\n\n');
+                    setStory(combinedStory);
+                    setOriginalityScore(data.originalityScore || 0);
+                    const jobIdFromResponse: string | null = data.imageJobId || null;
+                    const jobStatusFromResponse: ImageJobStatus = (data.imageJobStatus as ImageJobStatus) || (jobIdFromResponse ? 'queued' : 'completed');
+                    setImageJobId(jobIdFromResponse);
+                    setImageJobStatus(jobStatusFromResponse);
+                    setImageJobError(null);
+                    setLastImageRefreshAt(Date.now());
                     setStep(3);
                   } catch (err) {
                     console.error('Story generation error:', err);
@@ -172,21 +375,34 @@ const PortfolioCreate: React.FC = () => {
             </div>
           </div>
         );
-      case 3:
+      case 3: {
+        const totalScenes = scenes.length;
+        const completedScenes = scenes.filter((scene) => Boolean(scene.imageUrl)).length;
+        const failedScenes = scenes.filter((scene) => Boolean(scene.imageError)).length;
+        const jobInProgress = imageJobStatus === 'queued' || imageJobStatus === 'running';
+        const statusLabelMap: Record<ImageJobStatus, string> = {
+          idle: 'Illustrations not requested',
+          queued: 'Waiting in queue',
+          running: 'Generating illustrations...',
+          completed: 'Illustrations ready',
+          completed_with_errors: 'Completed with warnings',
+          failed: 'Image generation failed',
+        };
+        const statusLabel = statusLabelMap[imageJobStatus] || imageJobStatus;
+
         return (
           <div className="max-w-6xl mx-auto">
             <h2 className="text-4xl font-bold text-center mb-8">✨ Your Story is Ready!</h2>
             <p className="text-center text-gray-600 mb-8">Step 3/6 - Review and edit your generated story</p>
-            
+
             {isGenerating ? (
               <div className="text-center py-20">
                 <div className="animate-spin w-16 h-16 border-4 border-primary-600 border-t-transparent rounded-full mx-auto mb-4"></div>
                 <h3 className="text-2xl font-bold mb-2">🎨 Crafting your story...</h3>
-                <p className="text-gray-600">Our AI children's writer is creating an amazing story based on your idea!</p>
+                <p className="text-gray-600">This currently takes about 60-90 seconds while we generate the storyboard and illustrations.</p>
               </div>
             ) : (
               <>
-                {/* Originality Score Banner */}
                 <div className="card bg-gradient-to-r from-primary-500 to-secondary-500 text-white text-center mb-8">
                   <div className="flex items-center justify-center gap-8">
                     <div>
@@ -197,21 +413,148 @@ const PortfolioCreate: React.FC = () => {
                       <div className="flex items-center gap-2 mb-2">
                         <Sparkles className="w-6 h-6" />
                         <span className="text-xl font-semibold">
-                          {originalityScore >= 90 ? '🌟 Exceptional!' : 
-                           originalityScore >= 80 ? '✨ Excellent!' : 
-                           originalityScore >= 70 ? '💫 Great!' : 
+                          {originalityScore >= 90 ? '🌟 Exceptional!' :
+                           originalityScore >= 80 ? '✨ Excellent!' :
+                           originalityScore >= 70 ? '💫 Great!' :
                            '⭐ Good!'}
                         </span>
                       </div>
                       <p className="text-sm opacity-90">
-                        {originalityScore >= 90 ? 'Your idea is extraordinarily creative and unique!' : 
-                         originalityScore >= 80 ? 'Your story shows impressive originality!' : 
-                         originalityScore >= 70 ? 'Your story has wonderful creative elements!' : 
+                        {originalityScore >= 90 ? 'Your idea is extraordinarily creative and unique!' :
+                         originalityScore >= 80 ? 'Your story shows impressive originality!' :
+                         originalityScore >= 70 ? 'Your story has wonderful creative elements!' :
                          'Your story has good creative potential!'}
                       </p>
                     </div>
                   </div>
                 </div>
+
+                {scenes.length > 0 && (
+                  <div className="mb-10">
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                        <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border ${jobInProgress ? 'border-primary-200 bg-primary-50 text-primary-700' : 'border-gray-200 text-gray-600'}`}>
+                          {jobInProgress ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-primary-500" />
+                          ) : (
+                            <Image className="w-4 h-4" />
+                          )}
+                          {statusLabel}
+                        </span>
+                        <span className="text-sm font-medium text-gray-700">
+                          {completedScenes}/{totalScenes} illustrations ready
+                        </span>
+                        {failedScenes > 0 && (
+                          <span className="text-sm font-medium text-red-500">
+                            {failedScenes} failed
+                          </span>
+                        )}
+                        {lastImageRefreshAt && (
+                          <span className="text-xs text-gray-400">
+                            Updated {new Date(lastImageRefreshAt).toLocaleTimeString()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {jobInProgress && (
+                          <span className="hidden text-xs text-gray-400 sm:inline">
+                            Auto-refreshing every 5s
+                          </span>
+                        )}
+                        <button
+                          onClick={() => fetchImageJobStatus(false)}
+                          disabled={!imageJobId || isRefreshingImages}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-100 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isRefreshingImages ? 'animate-spin' : ''}`} />
+                          {isRefreshingImages ? 'Refreshing...' : 'Refresh Images'}
+                        </button>
+                      </div>
+                    </div>
+                    {imageJobError && (
+                      <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg p-3 mb-4">
+                        {imageJobError}
+                      </div>
+                    )}
+                    <h3 className="text-2xl font-bold mb-4 flex items-center gap-2">
+                      <Film className="w-6 h-6 text-primary-600" />
+                      Storyboard Breakdown
+                    </h3>
+                    <div className="space-y-4">
+                      {scenes.map((scene) => (
+                        <div key={scene.id} className="card">
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                            <div>
+                              <div className="text-lg font-semibold">Scene {scene.id}</div>
+                              {scene.title && <div className="text-sm text-primary-100/90">{scene.title}</div>}
+                            </div>
+                            <span className="text-sm px-3 py-1 rounded-full bg-primary-50 text-primary-600 font-medium">
+                              Duration: {scene.durationSeconds}s
+                            </span>
+                          </div>
+                          {scene.imageUrl ? (
+                            <div className="mb-4 overflow-hidden rounded-xl border border-primary-100">
+                              <img
+                                src={scene.imageUrl}
+                                alt={scene.title || `Scene ${scene.id}`}
+                                className="w-full h-48 object-cover"
+                                loading="lazy"
+                              />
+                            </div>
+                          ) : (
+                            <div className="mb-4 overflow-hidden rounded-xl border border-dashed border-gray-200 bg-gray-50">
+                              <div className="flex flex-col items-center justify-center h-48 gap-2 px-6 text-center">
+                                {scene.imageError ? (
+                                  <>
+                                    <Image className="w-6 h-6 text-red-400" />
+                                    <span className="text-sm text-red-500">
+                                      {scene.imageError}
+                                    </span>
+                                  </>
+                                ) : jobInProgress ? (
+                                  <>
+                                    <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
+                                    <span className="text-sm text-gray-500">
+                                      Generating illustration...
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Image className="w-6 h-6 text-gray-300" />
+                                    <span className="text-sm text-gray-500">
+                                      Illustration not available yet.
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{scene.story}</p>
+                          <div className="grid md:grid-cols-3 gap-4 mt-4">
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-600 mb-1">Voice Prompt (TTS)</h4>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm font-mono whitespace-pre-wrap break-words">
+                                {scene.voicePrompt}
+                              </div>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-600 mb-1">Image Prompt (Key Frame)</h4>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm font-mono whitespace-pre-wrap break-words">
+                                {scene.imagePrompt}
+                              </div>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-600 mb-1">Video Prompt (Shot Guidance)</h4>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm font-mono whitespace-pre-wrap break-words">
+                                {scene.videoPrompt}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid md:grid-cols-2 gap-6">
                   <div className="card bg-gray-50">
@@ -238,32 +581,54 @@ const PortfolioCreate: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex justify-between mt-8">
-                  <button onClick={() => setStep(2)} className="btn-secondary">Back</button>
+                  <button
+                    onClick={() => {
+                      clearImageJobPolling();
+                      setStep(2);
+                    }}
+                    className="btn-secondary"
+                  >
+                    Back
+                  </button>
                   <div className="space-x-4">
-                    <button 
+                    <button
                       onClick={async () => {
                         setIsGenerating(true);
                         setError(null);
-                        
+                        clearImageJobPolling();
+                        setImageJobId(null);
+                        setImageJobStatus('idle');
+                        setImageJobError(null);
+                        setLastImageRefreshAt(null);
+
                         try {
-                          const response = await fetch(`${API_URL}/api/ai/generate-story`, {
+                          const response = await fetch(buildApiUrl('/api/ai/generate-story'), {
                             method: 'POST',
                             headers: {
                               'Content-Type': 'application/json',
                             },
                             body: JSON.stringify({
                               idea: idea,
-                              theme: selectedTheme
+                              theme: selectedTheme,
                             }),
                           });
-                          
+
                           if (!response.ok) {
                             throw new Error('Failed to regenerate story');
                           }
-                          
+
                           const data = await response.json();
-                          setStory(data.story);
-                          setOriginalityScore(data.originalityScore);
+                          const receivedScenes: StoryScene[] = data.scenes || [];
+                          setScenes(receivedScenes);
+                          const combinedStory = data.story || receivedScenes.map((scene) => scene.story).join('\n\n');
+                          setStory(combinedStory);
+                          setOriginalityScore(data.originalityScore || 0);
+                          const jobIdFromResponse: string | null = data.imageJobId || null;
+                          const jobStatusFromResponse: ImageJobStatus = (data.imageJobStatus as ImageJobStatus) || (jobIdFromResponse ? 'queued' : 'completed');
+                          setImageJobId(jobIdFromResponse);
+                          setImageJobStatus(jobStatusFromResponse);
+                          setImageJobError(null);
+                          setLastImageRefreshAt(Date.now());
                         } catch (err) {
                           console.error('Story regeneration error:', err);
                           setError('Failed to regenerate story. Please try again.');
@@ -277,15 +642,26 @@ const PortfolioCreate: React.FC = () => {
                       <RefreshCw className={`w-5 h-5 ${isGenerating ? 'animate-spin' : ''}`} />
                       {isGenerating ? 'Regenerating...' : 'Regenerate'}
                     </button>
-                    <button 
+                    <button
                       onClick={() => {
-                        // Initialize storybook pages with mock data
-                        setStorybookPages([
-                          { id: 1, text: story.substring(0, 150) || 'Once upon a time, a little robot discovered the magic of painting...', image: '🎨' },
-                          { id: 2, text: story.substring(150, 300) || 'Every day, the robot would create beautiful artworks in different colors...', image: '🖼️' },
-                          { id: 3, text: story.substring(300, 450) || 'Other robots came to admire the paintings and wanted to learn...', image: '🤖' },
-                          { id: 4, text: story.substring(450, 600) || 'Together, they transformed the gray city into a colorful paradise...', image: '🌈' }
-                        ]);
+                        const generatedPages = scenes.length
+                          ? scenes.map((scene, idx) => ({
+                              id: idx + 1,
+                              title: scene.title,
+                              text: scene.story,
+                              image: scene.imageUrl ? '🖼️' : '🎬',
+                              imageUrl: scene.imageUrl,
+                              voicePrompt: scene.voicePrompt,
+                              imagePrompt: scene.imagePrompt,
+                              videoPrompt: scene.videoPrompt,
+                            }))
+                          : [
+                              { id: 1, text: story.substring(0, 150) || 'Once upon a time, a little robot discovered the magic of painting...', image: '🎨' },
+                              { id: 2, text: story.substring(150, 300) || 'Every day, the robot would create beautiful artworks in different colors...', image: '🖼️' },
+                              { id: 3, text: story.substring(300, 450) || 'Other robots came to admire the paintings and wanted to learn...', image: '🤖' },
+                              { id: 4, text: story.substring(450, 600) || 'Together, they transformed the gray city into a colorful paradise...', image: '🌈' },
+                            ];
+                        setStorybookPages(generatedPages);
                         setStep(4);
                       }}
                       className="btn-primary"
@@ -301,6 +677,7 @@ const PortfolioCreate: React.FC = () => {
             )}
           </div>
         );
+      }
       
       case 4:
         return (
@@ -322,7 +699,18 @@ const PortfolioCreate: React.FC = () => {
                         : 'border-gray-200 hover:border-gray-400'
                     }`}
                   >
-                    <div className="text-4xl">{page.image}</div>
+                    <div className="flex items-center justify-center h-full">
+                      {page.imageUrl ? (
+                        <img
+                          src={page.imageUrl}
+                          alt={`Scene ${idx + 1}`}
+                          className="w-full h-full object-cover rounded-md"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="text-4xl">{page.image}</div>
+                      )}
+                    </div>
                     <div className="text-xs mt-1">Page {idx + 1}</div>
                   </button>
                 ))}
@@ -332,9 +720,53 @@ const PortfolioCreate: React.FC = () => {
               <div className="col-span-7">
                 <div className="card bg-gradient-to-br from-purple-50 to-blue-50 min-h-[500px] flex items-center justify-center">
                   <div className="text-center p-8">
-                    <div className="text-8xl mb-6 animate-pulse">{storybookPages[currentPage]?.image}</div>
+                    <div className="mb-6">
+                      {storybookPages[currentPage]?.imageUrl ? (
+                        <img
+                          src={storybookPages[currentPage]?.imageUrl}
+                          alt={`Storyboard Scene ${storybookPages[currentPage]?.id}`}
+                          className="w-full max-w-lg h-64 object-cover rounded-2xl border border-primary-100 shadow-lg"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="text-8xl animate-pulse">{storybookPages[currentPage]?.image || '🎬'}</div>
+                      )}
+                    </div>
                     <div className="bg-white/80 backdrop-blur rounded-xl p-6 max-w-md">
+                      {storybookPages[currentPage]?.title && (
+                        <h4 className="text-lg font-semibold text-primary-600 mb-2">
+                          {storybookPages[currentPage]?.title}
+                        </h4>
+                      )}
                       <p className="text-lg leading-relaxed">{storybookPages[currentPage]?.text}</p>
+                      {(storybookPages[currentPage]?.voicePrompt || storybookPages[currentPage]?.imagePrompt || storybookPages[currentPage]?.videoPrompt) && (
+                        <div className="mt-6 space-y-4 text-left">
+                          {storybookPages[currentPage]?.voicePrompt && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-600 mb-1">Voice Prompt (TTS)</h4>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm font-mono whitespace-pre-wrap break-words">
+                                {storybookPages[currentPage]?.voicePrompt}
+                              </div>
+                            </div>
+                          )}
+                          {storybookPages[currentPage]?.imagePrompt && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-600 mb-1">Image Prompt (Key Frame)</h4>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm font-mono whitespace-pre-wrap break-words">
+                                {storybookPages[currentPage]?.imagePrompt}
+                              </div>
+                            </div>
+                          )}
+                          {storybookPages[currentPage]?.videoPrompt && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-600 mb-1">Video Prompt (Shot Guidance)</h4>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm font-mono whitespace-pre-wrap break-words">
+                                {storybookPages[currentPage]?.videoPrompt}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="mt-4 text-sm text-gray-600">
                       Page {currentPage + 1} of {storybookPages.length}
@@ -549,10 +981,22 @@ const PortfolioCreate: React.FC = () => {
                       </div>
                     </div>
                   ) : videoProgress === 100 ? (
-                    <div className="text-center">
+                    <div className="text-center w-full px-4">
                       <Check className="w-20 h-20 mx-auto mb-4 text-green-400" />
                       <h3 className="text-3xl font-bold mb-4">Video Ready! 🎉</h3>
-                      <Film className="w-32 h-32 mx-auto text-primary-400 mb-4" />
+                      {videoUrl ? (
+                        <div className="mb-6">
+                          <video 
+                            controls 
+                            className="max-w-full max-h-96 mx-auto rounded-lg"
+                            src={videoUrl}
+                          >
+                            Your browser does not support the video tag.
+                          </video>
+                        </div>
+                      ) : (
+                        <Film className="w-32 h-32 mx-auto text-primary-400 mb-4" />
+                      )}
                       <p className="text-gray-300 mb-6">Your amazing story is ready to share with the world!</p>
                       <button 
                         onClick={() => navigate('/portfolio/show-your-lights')}
@@ -658,19 +1102,40 @@ const PortfolioCreate: React.FC = () => {
               </button>
               {videoProgress < 100 && (
                 <button 
-                  onClick={() => {
-                    setIsGeneratingVideo(true);
-                    setVideoProgress(0);
-                    const interval = setInterval(() => {
-                      setVideoProgress(prev => {
-                        if (prev >= 100) {
-                          clearInterval(interval);
-                          setIsGeneratingVideo(false);
-                          return 100;
-                        }
-                        return prev + 5;
+                  onClick={async () => {
+                    try {
+                      setIsGeneratingVideo(true);
+                      setVideoProgress(0);
+                      setError(null);
+
+                      console.log('🎬 [Step6] Calling video generation API with scenes:', scenes.length);
+
+                      const response = await fetch(buildApiUrl('/api/drama/generate-video'), {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ scenes }),
                       });
-                    }, 300);
+
+                      if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Failed to start video generation');
+                      }
+
+                      const data = await response.json();
+                      console.log('✅ Video task created:', data.taskId);
+
+                      setVideoTaskId(data.taskId);
+                      setVideoProgress(10);
+                      // Polling will start automatically via useEffect
+
+                    } catch (err: any) {
+                      console.error('❌ Video generation error:', err);
+                      setError(err.message || 'Failed to start video generation');
+                      setIsGeneratingVideo(false);
+                      setVideoProgress(0);
+                    }
                   }}
                   className="btn-primary flex items-center gap-2 text-lg px-8 py-4"
                   disabled={isGeneratingVideo}

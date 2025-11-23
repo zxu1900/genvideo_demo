@@ -287,3 +287,6 @@ location /static/ {
 
 🎉 完成后，您的前端将完全连接到 PostgreSQL 数据库！
 
+
+
+

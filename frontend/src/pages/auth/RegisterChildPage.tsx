@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { UserPlus, Heart, Shield } from 'lucide-react';
+import { buildApiUrl } from '../../utils/api';
 
 const RegisterChildPage: React.FC = () => {
   const navigate = useNavigate();
@@ -19,7 +20,7 @@ const RegisterChildPage: React.FC = () => {
     e.preventDefault();
     setError(null);
     try {
-      const resp = await fetch('http://localhost:3001/api/auth/register', {
+      const resp = await fetch(buildApiUrl('/api/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

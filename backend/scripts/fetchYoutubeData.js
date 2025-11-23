@@ -72,7 +72,7 @@ async function fetchYoutubeVideos() {
     
     // Fetch playlist with basic info
     const { stdout } = await execPromise(
-      `yt-dlp --flat-playlist --print-json "${CHANNEL_URL}" 2>/dev/null`
+      `yt-dlp --no-check-certificate --flat-playlist --print-json "${CHANNEL_URL}" 2>/dev/null`
     );
     
     const lines = stdout.trim().split('\n').filter(line => line);
@@ -89,7 +89,7 @@ async function fetchYoutubeVideos() {
       
       try {
         const { stdout: detailStr } = await execPromise(
-          `yt-dlp --dump-json "https://www.youtube.com/watch?v=${video.id}" 2>/dev/null`
+          `yt-dlp --no-check-certificate --dump-json "https://www.youtube.com/watch?v=${video.id}" 2>/dev/null`
         );
         
         const detail = JSON.parse(detailStr);
@@ -175,4 +175,7 @@ if (require.main === module) {
 }
 
 module.exports = { fetchYoutubeVideos };
+
+
+
 

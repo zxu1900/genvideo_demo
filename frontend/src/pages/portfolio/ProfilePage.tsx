@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import type { User, Portfolio } from '../../types';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { buildApiUrl } from '../../utils/api';
 
 const ProfilePage: React.FC = () => {
   const { userId } = useParams();
@@ -18,14 +17,14 @@ const ProfilePage: React.FC = () => {
         setLoading(true);
         
         // Fetch user info
-        const userResponse = await fetch(`${API_URL}/api/users/${userId}`);
+        const userResponse = await fetch(buildApiUrl(`/api/users/${userId}`));
         if (userResponse.ok) {
           const userData = await userResponse.json();
           setUser(userData);
         }
 
         // Fetch user's portfolios
-        const portfoliosResponse = await fetch(`${API_URL}/api/portfolios`);
+        const portfoliosResponse = await fetch(buildApiUrl('/api/portfolios'));
         if (portfoliosResponse.ok) {
           const portfolios = await portfoliosResponse.json();
           setUserWorks(portfolios.filter((p: Portfolio) => p.userId === userId));

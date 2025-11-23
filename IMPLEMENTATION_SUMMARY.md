@@ -319,3 +319,6 @@ ON portfolios USING gin(to_tsvector('english', title || ' ' || story));
 
 准备好了吗？执行 Step 1 开始安装 PostgreSQL！🚀
 
+
+
+

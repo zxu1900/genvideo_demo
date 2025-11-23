@@ -3,6 +3,7 @@ const cors = require('cors');
 const nodemailer = require('nodemailer');
 const { pool, query } = require('./db/config');
 const { generateStoryWithAI, calculateOriginalityWithAI } = require('./services/aiService');
+const { createImageGenerationJob, getImageJob } = require('./services/comfyService');
 require('dotenv').config();
 
 const app = express();
@@ -407,7 +408,7 @@ app.get('/api/users/:id', async (req, res) => {
 // AI Routes (enhanced story generation)
 // ============================================
 app.post('/api/ai/generate-story', async (req, res) => {
-  const { idea, theme } = req.body;
+  const { idea, theme, useN8n = true } = req.body;
   
   if (!idea || !theme) {
     return res.status(400).json({ 
@@ -418,8 +419,100 @@ app.post('/api/ai/generate-story', async (req, res) => {
   try {
     console.log(`📝 Generating story for theme: ${theme}, idea length: ${idea.length}`);
     
-    // 使用 DeepSeek API 生成故事
-    const generatedStory = await generateStoryWithAI(theme, idea);
+    // 使用 DeepSeek API 生成分镜故事
+    const storyboard = await generateStoryWithAI(theme, idea);
+    const generatedStory = storyboard.story;
+    const storyboardScenes = storyboard.scenes || [];
+
+    let scenes = storyboardScenes;
+    let imageJobId = null;
+    let imageJobStatus = 'idle';
+
+    // 判断是使用 n8n 还是直连 ComfyUI
+    if (storyboardScenes.length > 0) {
+      if (useN8n && process.env.N8N_BASE_URL) {
+        // 使用 n8n 生成图片（回调模式）
+        console.log('🎨 Using n8n for image generation (callback mode)');
+        
+        const taskId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:3002';
+        const callbackUrl = `${backendUrl}/api/ai/image-callback/${taskId}`;
+        
+        // 创建任务记录
+        imageTasks.set(taskId, {
+          id: taskId,
+          type: 'image',
+          status: 'running',
+          progress: 10,
+          scenes: storyboardScenes.map((scene, index) => ({
+            ...scene,
+            scene_index: index,
+            imageUrl: null
+          })),
+          result: null,
+          error: null,
+          n8nExecutionId: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        
+        console.log(`🔗 Callback URL for image task ${taskId}: ${callbackUrl}`);
+        
+        try {
+          // 调用 n8n webhook
+          const n8nWebhookUrl = `${process.env.N8N_BASE_URL}/webhook/story_images_parallel`;
+          console.log(`📡 Calling n8n webhook: ${n8nWebhookUrl}`);
+          
+          const n8nPayload = {
+            scenes: storyboardScenes.map((scene, index) => ({
+              id: scene.id || index + 1,
+              imagePrompt: scene.imagePrompt || scene.story || '',
+              scene_index: index
+            })),
+            task_id: taskId,
+            callback_url: callbackUrl
+          };
+          
+          const n8nResponse = await axios.post(n8nWebhookUrl, n8nPayload, {
+            timeout: 30000,
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          const task = imageTasks.get(taskId);
+          task.n8nExecutionId = n8nResponse.data?.execution_id || 'unknown';
+          task.updatedAt = new Date().toISOString();
+          
+          console.log(`✅ n8n image workflow triggered, execution ID: ${task.n8nExecutionId}`);
+          
+          imageJobId = taskId;
+          imageJobStatus = 'running';
+          scenes = task.scenes;
+          
+        } catch (error) {
+          console.error('❌ n8n image workflow call failed:', error.message);
+          
+          // n8n 调用失败，回退到直连 ComfyUI
+          console.log('⚠️  Falling back to direct ComfyUI connection');
+          imageTasks.delete(taskId);
+          
+          const { jobId, job } = createImageGenerationJob(storyboardScenes);
+          imageJobId = jobId;
+          if (job) {
+            scenes = job.scenes;
+            imageJobStatus = job.status;
+          }
+        }
+      } else {
+        // 直连 ComfyUI（原有逻辑）
+        console.log('🎨 Using direct ComfyUI connection');
+        const { jobId, job } = createImageGenerationJob(storyboardScenes);
+        imageJobId = jobId;
+        if (job) {
+          scenes = job.scenes;
+          imageJobStatus = job.status;
+        }
+      }
+    }
     
     // 使用 DeepSeek API 计算原创度分数
     const originalityScore = await calculateOriginalityWithAI(idea, generatedStory);
@@ -429,12 +522,17 @@ app.post('/api/ai/generate-story', async (req, res) => {
     res.json({ 
       success: true, 
       story: generatedStory,
+      scenes,
       originalityScore: originalityScore,
+      imageJobId,
+      imageJobStatus,
       metadata: {
         theme: theme,
         wordCount: generatedStory.length,
+        sceneCount: storyboardScenes.length,
         generatedAt: new Date().toISOString(),
-        aiProvider: 'deepseek'
+        aiProvider: 'deepseek',
+        imageGenerator: useN8n && process.env.N8N_BASE_URL ? 'n8n' : 'comfyui'
       }
     });
   } catch (error) {
@@ -443,6 +541,348 @@ app.post('/api/ai/generate-story', async (req, res) => {
       error: 'Failed to generate story. Please try again.' 
     });
   }
+});
+
+// 图像生成回调接口（n8n 调用）
+app.post('/api/ai/image-callback/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  const { status, task_id, images, stats, error } = req.body;
+  
+  console.log(`📥 [Image Callback] Received n8n callback for task ${taskId}:`, {
+    status,
+    imageCount: images?.length,
+    stats,
+    error
+  });
+  
+  const task = imageTasks.get(taskId);
+  
+  if (!task) {
+    console.warn(`⚠️  Image task ${taskId} not found for callback`);
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  
+  // 更新任务状态
+  task.status = status || 'completed';
+  task.progress = status === 'completed' ? 100 : (status === 'failed' ? task.progress : 90);
+  task.updatedAt = new Date().toISOString();
+  
+  if (error) {
+    task.error = error;
+    console.error(`❌ [Image Callback] Task ${taskId} failed:`, error);
+  }
+  
+  if (images && Array.isArray(images)) {
+    // 更新场景的图片 URL
+    images.forEach(img => {
+      const scene = task.scenes.find(s => s.id === img.scene_id || s.scene_index === img.scene_index);
+      if (scene) {
+        scene.imageUrl = img.imageUrl;
+        scene.imageError = img.error || null;
+      }
+    });
+    
+    task.result = { images };
+    console.log(`✅ [Image Callback] Task ${taskId} completed with ${images.length} images`);
+  }
+  
+  if (stats) {
+    task.stats = stats;
+  }
+  
+  res.json({
+    success: true,
+    message: 'Image task updated'
+  });
+});
+
+app.get('/api/ai/image-jobs/:jobId', (req, res) => {
+  const { jobId } = req.params;
+
+  if (!jobId) {
+    return res.status(400).json({ error: 'Missing image job ID' });
+  }
+
+  // 先检查 n8n 任务
+  if (imageTasks.has(jobId)) {
+    const task = imageTasks.get(jobId);
+    return res.json({
+      jobId: task.id,
+      status: task.status,
+      scenes: task.scenes,
+      completedScenes: task.scenes.filter(s => s.imageUrl).length,
+      totalScenes: task.scenes.length,
+      progress: task.progress,
+      stats: task.stats,
+      errors: task.scenes.filter(s => s.imageError).map(s => ({
+        sceneId: s.id,
+        message: s.imageError
+      })),
+      timestamps: {
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt
+      }
+    });
+  }
+
+  // 兼容旧的 ComfyUI 直连任务
+  const job = getImageJob(jobId);
+
+  if (!job) {
+    return res.status(404).json({ error: 'Image job not found' });
+  }
+
+  res.json({
+    jobId: job.id,
+    status: job.status,
+    scenes: job.scenes,
+    completedScenes: job.completedScenes,
+    totalScenes: job.totalScenes,
+    errors: job.errors,
+    timestamps: {
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+      updatedAt: job.updatedAt,
+    },
+    lastError: job.lastError,
+  });
+});
+
+// ============================================
+// Video Generation (Step6) - n8n Integration
+// ============================================
+const axios = require('axios');
+const videoTasks = new Map(); // 简易内存任务存储
+const imageTasks = new Map(); // 图像生成任务存储（n8n）
+
+// Mock 视频生成接口 - 用于快速测试（无需等待 n8n）
+app.post('/api/drama/generate-video-mock', async (req, res) => {
+  try {
+    const { scenes } = req.body;
+    
+    if (!scenes || !Array.isArray(scenes) || scenes.length === 0) {
+      return res.status(400).json({ error: '请提供有效的 scenes 数组' });
+    }
+    
+    const taskId = `video_mock_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    
+    const task = {
+      id: taskId,
+      type: 'video',
+      status: 'running',
+      progress: 10,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      n8n_execution_id: 'mock',
+      result: null,
+      error: null
+    };
+    
+    videoTasks.set(taskId, task);
+    console.log(`🎭 [Mock] Created mock task ${taskId} with ${scenes.length} scenes`);
+    
+    // 模拟视频生成过程（5秒后自动完成）
+    setTimeout(() => {
+      task.status = 'completed';
+      task.progress = 100;
+      task.result = {
+        videoUrl: 'http://49.235.210.6:8001/output/mock_final_video.mp4'
+      };
+      task.updated_at = new Date().toISOString();
+      console.log(`✅ [Mock] Task ${taskId} completed automatically`);
+    }, 5000); // 5秒后完成
+    
+    res.json({
+      success: true,
+      taskId: taskId,
+      status: task.status,
+      message: 'Mock 视频生成任务已创建（5秒后自动完成）',
+      n8nExecutionId: 'mock',
+      note: '这是测试接口，实际视频生成请使用 /api/drama/generate-video'
+    });
+    
+  } catch (error) {
+    console.error('❌ Mock video generation error:', error);
+    res.status(500).json({ 
+      error: 'Mock 任务创建失败', 
+      details: error.message 
+    });
+  }
+});
+
+app.post('/api/drama/generate-video', async (req, res) => {
+  try {
+    console.log(`📥 [Step6] Received request, body keys:`, Object.keys(req.body));
+    const { scenes } = req.body;
+    
+    if (!scenes || !Array.isArray(scenes) || scenes.length === 0) {
+      console.error(`❌ [Step6] Invalid scenes:`, { scenesType: typeof scenes, scenesIsArray: Array.isArray(scenes), scenesLength: scenes?.length });
+      return res.status(400).json({ 
+        success: false, 
+        error: '请提供有效的 scenes 数组' 
+      });
+    }
+
+    console.log(`🎬 [Step6] Triggering video generation for ${scenes.length} scenes`);
+    console.log(`📝 [Step6] First scene keys:`, Object.keys(scenes[0]));
+
+    // 创建任务 ID
+    const taskId = `video_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const task = {
+      id: taskId,
+      type: 'video',
+      status: 'queued',
+      progress: 0,
+      scenes: scenes,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      n8n_execution_id: null,
+      result: null,
+      error: null
+    };
+
+    videoTasks.set(taskId, task);
+
+    try {
+      // 调用 n8n workflow (story_final_v2 - webhook path, workflow name is story_final_from_scenes)
+      const n8nWebhookUrl = `${process.env.N8N_BASE_URL}/webhook/story_final_v2`;
+      console.log(`📡 Calling n8n webhook: ${n8nWebhookUrl}`);
+      
+      // 字段映射：前端使用 voicePrompt，n8n 期望 audio_script
+      const mappedScenes = scenes.map((scene, idx) => ({
+        scene_id: scene.id || idx + 1,
+        duration: scene.durationSeconds || 6,
+        audio_script: scene.voicePrompt || scene.story || '',
+        subtitle: scene.story || scene.voicePrompt || '',
+        video_prompt: scene.videoPrompt || scene.imagePrompt || '',
+        story: scene.story || ''
+      }));
+
+      console.log(`🎬 Mapped scenes for n8n:`, mappedScenes.length, 'scenes');
+      console.log(`📝 First scene audio_script:`, mappedScenes[0]?.audio_script?.substring(0, 50) + '...');
+      
+      // 构建回调 URL（需要从环境变量或请求中获取后端地址）
+      const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+      const callbackUrl = `${backendUrl}/api/drama/callback/${taskId}`;
+      
+      const n8nResponse = await axios.post(n8nWebhookUrl, {
+        scenes: mappedScenes,
+        original_story: scenes.map(s => s.story || s.voicePrompt || '').join(' '),
+        task_id: taskId,
+        callback_url: callbackUrl
+      }, {
+        timeout: 30000, // 30秒超时（n8n可能需要较长初始化时间）
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      console.log(`📞 Callback URL for task ${taskId}: ${callbackUrl}`);
+
+      // n8n webhook 返回后更新任务状态
+      task.status = 'running';
+      task.progress = 10;
+      task.n8n_execution_id = n8nResponse.data?.executionId || 'unknown';
+      task.updated_at = new Date().toISOString();
+
+      console.log(`✅ n8n workflow triggered, execution ID: ${task.n8n_execution_id}`);
+
+      res.json({
+        success: true,
+        taskId: taskId,
+        status: task.status,
+        message: '视频生成任务已提交到 n8n，请轮询任务状态',
+        n8nExecutionId: task.n8n_execution_id
+      });
+
+    } catch (n8nError) {
+      console.error('❌ n8n webhook调用失败:', n8nError.message);
+      console.error('❌ n8n error stack:', n8nError.stack);
+      
+      task.status = 'failed';
+      task.error = `n8n 调用失败: ${n8nError.message}`;
+      task.updated_at = new Date().toISOString();
+
+      res.status(500).json({
+        success: false,
+        taskId: taskId,
+        error: 'n8n 视频生成服务暂时不可用',
+        details: n8nError.message
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ 视频生成任务创建失败:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      error: '视频生成失败，请稍后重试',
+      details: error.message
+    });
+  }
+});
+
+// n8n 完成回调接口
+app.post('/api/drama/callback/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  const { status, videoUrl, error } = req.body;
+
+  console.log(`📥 [Callback] Received n8n callback for task ${taskId}:`, { status, videoUrl: videoUrl ? 'present' : 'null', error });
+
+  const task = videoTasks.get(taskId);
+  
+  if (!task) {
+    console.warn(`⚠️  Task ${taskId} not found for callback`);
+    return res.status(404).json({ error: 'Task not found' });
+  }
+
+  // 更新任务状态
+  task.status = status || 'completed';
+  task.progress = status === 'completed' ? 100 : (status === 'failed' ? task.progress : 90);
+  task.updated_at = new Date().toISOString();
+
+  if (videoUrl) {
+    task.result = { videoUrl };
+    console.log(`✅ [Callback] Task ${taskId} completed with video: ${videoUrl}`);
+  }
+
+  if (error) {
+    task.error = error;
+    task.status = 'failed';
+    console.error(`❌ [Callback] Task ${taskId} failed: ${error}`);
+  }
+
+  res.json({ success: true, message: 'Task updated' });
+});
+
+// 查询视频任务状态
+app.get('/api/drama/task/:taskId', (req, res) => {
+  const { taskId } = req.params;
+
+  if (!taskId) {
+    return res.status(400).json({ error: 'Missing task ID' });
+  }
+
+  const task = videoTasks.get(taskId);
+
+  if (!task) {
+    return res.status(404).json({ error: 'Video task not found or expired' });
+  }
+
+  res.json({
+    success: true,
+    task: {
+      id: task.id,
+      type: task.type,
+      status: task.status,
+      progress: task.progress,
+      result: task.result,
+      error: task.error,
+      n8nExecutionId: task.n8n_execution_id,
+      createdAt: task.created_at,
+      updatedAt: task.updated_at
+    }
+  });
 });
 
 // Note: Local fallback functions are now in services/aiService.js
@@ -474,8 +914,17 @@ app.post('/api/ai/chat', (req, res) => {
 // ============================================
 // Start server
 // ============================================
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 WriteTalent Backend running on port ${PORT}`);
   console.log(`📚 API Health: http://localhost:${PORT}/api/health`);
 });
+
+const SERVER_TIMEOUT_MS = parseInt(process.env.SERVER_TIMEOUT_MS || '0', 10);
+if (SERVER_TIMEOUT_MS > 0) {
+  server.setTimeout(SERVER_TIMEOUT_MS);
+  console.log(`⏱️  Server request timeout set to ${SERVER_TIMEOUT_MS}ms`);
+} else {
+  server.setTimeout(0); // disable timeout
+  console.log('⏱️  Server request timeout disabled (infinite)');
+}
 

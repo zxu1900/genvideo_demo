@@ -406,24 +406,53 @@ app.get('/api/users/:id', async (req, res) => {
 // AI Routes (mock responses)
 // ============================================
 app.post('/api/ai/generate-story', (req, res) => {
-  const { idea, theme } = req.body;
-  
-  // Mock story generation
-  setTimeout(() => {
-    const generatedStory = `Based on your idea: "${idea}", here's a wonderful story about ${theme}. 
+  const { idea, theme } = req.body || {};
+  (async () => {
+    try {
+      const { generateStoryWithAI, calculateOriginalityWithAI } = require('./services/aiService');
+      const { createImageGenerationJob } = require('./services/comfyService');
+ 
+      console.log('[GenerateStory] incoming payload:', { idea: !!idea, theme });
+      console.log('[GenerateStory] COMFYUI_BASE_URL:', process.env.COMFYUI_BASE_URL);
 
-Once upon a time, there was a young dreamer who had an amazing idea. This idea would change everything and lead to incredible adventures. The story unfolds with excitement, challenges, and ultimately triumph.
-
-Through perseverance and creativity, our hero learns valuable lessons about friendship, courage, and the power of imagination. The journey teaches us that every great story begins with a single, brilliant idea.
-
-And they all lived happily ever after, knowing that their creativity could change the world.`;
-
-    res.json({ 
+      if (!idea || !theme) {
+        return res.status(400).json({ error: 'Missing required fields: idea, theme' });
+      }
+ 
+      // 1) 生成故事与分镜
+      const storyboard = await generateStoryWithAI(theme, idea);
+      const scenes = Array.isArray(storyboard?.scenes) ? storyboard.scenes : [];
+      const story = String(storyboard?.story || '');
+ 
+      if (!scenes.length) {
+        return res.status(500).json({ error: 'Failed to generate scenes' });
+      }
+ 
+      // 2) 异步创建图像生成任务（直连 ComfyUI）
+      console.log('[GenerateStory] creating image job with scenes:', scenes.length);
+      const { jobId, job } = createImageGenerationJob(scenes);
+ 
+      // 3) 计算原创度（尽量异步完成，并行不阻塞主要返回）
+      let originalityScore = 0;
+      try {
+        originalityScore = await calculateOriginalityWithAI(idea, story);
+      } catch (err) {
+        originalityScore = 0;
+      }
+ 
+      return res.json({
       success: true, 
-      story: generatedStory,
-      originalityScore: Math.floor(Math.random() * 30) + 70
-    });
-  }, 2000); // Simulate AI processing time
+        story,
+        scenes,
+        imageJobId: jobId,
+        imageJobStatus: job?.status || 'queued',
+        originalityScore,
+      });
+    } catch (error) {
+      console.error('generate-story error:', error);
+      return res.status(500).json({ error: 'Failed to generate story' });
+    }
+  })();
 });
 
 app.post('/api/ai/chat', (req, res) => {
@@ -450,10 +479,31 @@ app.post('/api/ai/chat', (req, res) => {
 });
 
 // ============================================
+// Image Job Routes (ComfyUI)
+// ============================================
+app.get('/api/ai/image-jobs/:id', (req, res) => {
+  try {
+    const { getImageJob } = require('./services/comfyService');
+    const jobId = req.params.id;
+    const job = getImageJob(jobId);
+    if (!job) {
+      return res.status(404).json({ error: 'Image job not found' });
+    }
+    return res.json(job);
+  } catch (error) {
+    console.error('get image job error:', error);
+    return res.status(500).json({ error: 'Failed to fetch image job' });
+  }
+});
+
+// ============================================
 // Start server
 // ============================================
 app.listen(PORT, () => {
   console.log(`🚀 WriteTalent Backend running on port ${PORT}`);
   console.log(`📚 API Health: http://localhost:${PORT}/api/health`);
 });
+
+
+
 

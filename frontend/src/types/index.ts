@@ -58,6 +58,23 @@ export interface Portfolio {
   rating: number;
 }
 
+export interface StoryScene {
+  id: number;
+  title?: string;
+  durationSeconds: number;
+  story: string;
+  voicePrompt: string;
+  imagePrompt: string;
+  videoPrompt: string;
+  imageUrl?: string | null;
+  comfyImage?: {
+    filename: string;
+    subfolder?: string;
+    type?: string;
+  };
+  imageError?: string | null;
+}
+
 export interface StoryPage {
   id: string;
   pageNumber: number;

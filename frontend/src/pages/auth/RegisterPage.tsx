@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
+import { buildApiUrl } from '../../utils/api';
 
 const RegisterPage: React.FC = () => {
   const navigate = useNavigate();
@@ -52,7 +53,7 @@ const RegisterPage: React.FC = () => {
       console.log('Email:', formData.email);
       console.log('Username:', formData.username);
       
-      const response = await fetch('http://localhost:3001/api/auth/register', {
+      const response = await fetch(buildApiUrl('/api/auth/register'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

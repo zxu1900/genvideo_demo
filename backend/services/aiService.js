@@ -8,6 +8,7 @@ require('dotenv').config();
 const deepseek = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY,
   baseURL: 'https://api.deepseek.com',
+  timeout: 30000,
 });
 
 /**
@@ -49,13 +50,13 @@ const THEME_PROMPTS = {
 };
 
 /**
- * 使用 DeepSeek API 生成儿童故事
+ * 使用 DeepSeek API 生成儿童故事分镜
  */
 async function generateStoryWithAI(theme, idea) {
   // 检查是否配置了 DeepSeek API key
   if (!process.env.DEEPSEEK_API_KEY || process.env.DEEPSEEK_API_KEY === 'your_api_key_here') {
     console.log('⚠️  DeepSeek API key not configured, using local generation');
-    return generateLocalStory(theme, idea);
+    return generateLocalStoryboard(theme, idea);
   }
 
   try {
@@ -65,14 +66,27 @@ async function generateStoryWithAI(theme, idea) {
 
 孩子的想法：${idea}
 
-请基于以上想法创作一个完整的儿童故事，要求：
-1. 保留孩子想法的核心创意
-2. 故事完整、流畅、富有画面感
-3. 语言优美、适合儿童阅读
-4. 传递积极正向的价值观
-5. 字数控制在 400-600 字
+请基于以上信息创作一个完整的儿童故事，并按照以下要求输出 JSON：
 
-请直接输出故事内容，不要包含任何额外说明或标题。`;
+1. 故事需要被拆分为 5-8 个分镜(scene)，每个分镜时长不超过 8 秒，场景连续，衔接自然。
+2. 每个分镜都要包含：
+   - "id": 分镜序号，从 1 开始递增
+   - "title": 分镜标题（可选，但推荐）
+   - "durationSeconds": 建议时长（整数，1-8 之间）
+   - "story": 这个分镜要讲述的故事内容，使用温暖、生动、适合儿童的语言
+   - "voicePrompt": 给语音合成(TTS)使用的旁白文案，要求口语化、富有情感
+   - "imagePrompt": 用于生成该分镜首帧图像的提示词，采用英文描述，包含场景、角色、情绪、光线等细节
+   - "videoPrompt": 用于生成该分镜完整视频的提示词，采用英文描述，包含镜头感、动作、氛围、画面细节
+3. 语言要求：
+   - story 与 voicePrompt 使用中文
+   - imagePrompt 与 videoPrompt 使用英文
+4. JSON 顶层结构必须为：
+{
+  "scenes": [
+    { ... scene对象 ... }
+  ]
+}
+5. 不要输出除 JSON 以外的任何内容，也不要使用 Markdown 代码块。`;
 
     console.log('🤖 Calling DeepSeek API for story generation...');
     
@@ -87,11 +101,17 @@ async function generateStoryWithAI(theme, idea) {
       stream: false,
     });
 
-    const story = completion.choices[0].message.content.trim();
-    console.log('✅ Story generated successfully via DeepSeek API');
+    const rawText = completion.choices[0].message.content.trim();
+    const parsedStoryboard = parseStoryboardResponse(rawText, theme, idea);
+
+    if (!parsedStoryboard) {
+      throw new Error('Failed to parse DeepSeek storyboard response');
+    }
+
+    console.log(`✅ Story generated successfully via DeepSeek API (scenes: ${parsedStoryboard.scenes?.length || 0})`);
     console.log(`📊 Tokens used: ${completion.usage?.total_tokens || 'N/A'}`);
     
-    return story;
+    return parsedStoryboard;
   } catch (error) {
     console.error('❌ DeepSeek API error:', error.message);
     if (error.response) {
@@ -100,14 +120,64 @@ async function generateStoryWithAI(theme, idea) {
     
     // Fallback to local generation if API fails
     console.log('⚠️  Falling back to local generation...');
-    return generateLocalStory(theme, idea);
+    return generateLocalStoryboard(theme, idea);
+  }
+}
+
+/**
+ * 解析 DeepSeek 返回的分镜 JSON
+ */
+function parseStoryboardResponse(rawText, theme, idea) {
+  let jsonText = rawText.trim();
+
+  // 去除 Markdown 代码块
+  const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch) {
+    jsonText = codeBlockMatch[1].trim();
+  }
+
+  try {
+    const data = JSON.parse(jsonText);
+    if (!data || !Array.isArray(data.scenes)) {
+      throw new Error('scenes array missing');
+    }
+
+    const scenes = data.scenes.map((scene, index) => {
+      const duration = Number.parseInt(scene.durationSeconds, 10);
+      const safeDuration = Number.isFinite(duration) ? Math.min(Math.max(duration, 1), 8) : 6;
+      const storyText = String(scene.story || '').trim();
+
+      const fallbackPrompt = storyText
+        ? `Children's story illustration, ${storyText.slice(0, 120)}`
+        : `Children's story theme ${theme}, inspired by ${idea}`;
+
+      return {
+        id: Number.isFinite(scene.id) ? Number(scene.id) : index + 1,
+        title: scene.title ? String(scene.title).trim() : undefined,
+        durationSeconds: safeDuration,
+        story: storyText,
+        voicePrompt: String(scene.voicePrompt || storyText).trim(),
+        imagePrompt: String(scene.imagePrompt || fallbackPrompt).trim(),
+        videoPrompt: String(scene.videoPrompt || `Children's cinematic scene, ${storyText || idea}`).trim(),
+      };
+    }).filter(scene => scene.story);
+
+    if (!scenes.length) {
+      throw new Error('No valid scenes were parsed');
+    }
+
+    const combinedStory = scenes.map(scene => scene.story).join('\n\n');
+    return { story: combinedStory, scenes };
+  } catch (err) {
+    console.error('❌ JSON parse error for DeepSeek storyboard:', err.message);
+    return null;
   }
 }
 
 /**
  * 本地故事生成（作为 API 失败时的后备方案）
  */
-function generateLocalStory(theme, idea) {
+function generateLocalStoryboard(theme, idea) {
   const themeIntros = {
     'fantasy-adventure': ['在一个充满魔法的世界里', '在遥远的魔法王国中', '在星光闪烁的夜晚'],
     'creation-exploration': ['在一个充满创意的小镇上', '在科学实验室的角落里', '在发明家的工作室中'],
@@ -138,7 +208,30 @@ ${idea.substring(0, 100)}${idea.length > 100 ? '...' : ''}
 
 故事的结尾，是全新的开始。因为在每个孩子的心中，都藏着无限的可能性，等待着被发现，被创造，被分享给这个世界。`;
 
-  return story;
+  const paragraphs = story.split('\n\n').filter(Boolean);
+  const scenes = paragraphs.slice(0, 6).map((para, idx) => {
+    const baseKeywords = extractKeywords(para).join(', ');
+    return {
+      id: idx + 1,
+      durationSeconds: Math.min(6 + (idx % 3), 8),
+      story: para,
+      voicePrompt: para,
+      imagePrompt: `Children's illustration, ${theme}, ${baseKeywords || idea}, warm lighting, storybook style`,
+      videoPrompt: `Children's cinematic animation shot, ${theme}, ${baseKeywords || idea}, vibrant colors, gentle camera movement`,
+    };
+  });
+
+  return {
+    story,
+    scenes: scenes.length ? scenes : [{
+      id: 1,
+      durationSeconds: 6,
+      story,
+      voicePrompt: story,
+      imagePrompt: `Children's illustration, ${theme}, ${idea}`,
+      videoPrompt: `Children's cinematic animation, ${theme}, ${idea}`,
+    }],
+  };
 }
 
 /**
@@ -248,7 +341,7 @@ function extractKeywords(text) {
 module.exports = {
   generateStoryWithAI,
   calculateOriginalityWithAI,
-  generateLocalStory,
+  generateLocalStoryboard,
   calculateLocalOriginalityScore,
   extractKeywords,
 };

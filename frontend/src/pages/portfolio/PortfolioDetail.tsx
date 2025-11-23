@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Heart, Share2 } from 'lucide-react';
 import type { Portfolio } from '../../types';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { buildApiUrl } from '../../utils/api';
 
 const PortfolioDetail: React.FC = () => {
   const { id } = useParams();
@@ -18,7 +17,7 @@ const PortfolioDetail: React.FC = () => {
       
       try {
         setLoading(true);
-        const response = await fetch(`${API_URL}/api/portfolios/${id}`);
+        const response = await fetch(buildApiUrl(`/api/portfolios/${id}`));
         if (!response.ok) {
           throw new Error('Portfolio not found');
         }
