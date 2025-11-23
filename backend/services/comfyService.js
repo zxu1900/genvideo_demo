@@ -4,8 +4,9 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
-const workflowTemplatePath = path.join(__dirname, '../comfy/workflowTemplate.json');
-const workflowTemplate = JSON.parse(fs.readFileSync(workflowTemplatePath, 'utf-8'));
+// 使用 Flux workflow
+const fluxWorkflowPath = path.join(__dirname, '../comfy/flux_dev_full_text_to_image.json');
+const fluxWorkflowTemplate = JSON.parse(fs.readFileSync(fluxWorkflowPath, 'utf-8'));
 
 const COMFY_BASE_URL = (process.env.COMFYUI_BASE_URL || 'http://117.50.193.105:8188').replace(/\/$/, '');
 console.log(`[ComfyService] COMFY_BASE_URL resolved to: ${COMFY_BASE_URL}`);
@@ -29,39 +30,69 @@ const IMAGE_JOB_CLEANUP_INTERVAL_MS = parseInt(process.env.COMFYUI_JOB_CLEANUP_I
 const imageJobs = new Map();
 
 function cloneWorkflow() {
-  return JSON.parse(JSON.stringify(workflowTemplate));
+  return JSON.parse(JSON.stringify(fluxWorkflowTemplate));
 }
 
-function createWorkflowPayload(promptText, seed, filenamePrefix) {
+/**
+ * 创建 Flux workflow payload
+ * @param {string} imagePrompt - CLIP-L 主要描述（简洁）
+ * @param {string} imagePromptDetailed - T5-XXL 详细描述（可选）
+ * @param {number} seed - 随机种子
+ * @param {string} filenamePrefix - 文件名前缀
+ */
+function createWorkflowPayload(imagePrompt, imagePromptDetailed = '', seed, filenamePrefix) {
   const workflow = cloneWorkflow();
 
-  workflow.prompt['4'].inputs.ckpt_name = COMFY_MODEL;
-  workflow.prompt['6'].inputs.text = `${COMFY_POSITIVE_PROMPT_PREFIX} ${promptText}`.trim();
-  workflow.prompt['7'].inputs.text = COMFY_NEGATIVE_PROMPT;
+  // 节点 41: CLIPTextEncodeFlux - 设置双 CLIP prompt
+  workflow['41'].inputs.clip_l = imagePrompt || 'A vibrant children\'s book illustration in a modern cartoon style.';
+  workflow['41'].inputs.t5xxl = imagePromptDetailed || '';
+  workflow['41'].inputs.guidance = parseFloat(process.env.FLUX_GUIDANCE || '3.5');
 
-  workflow.prompt['3'].inputs.seed = seed;
-  workflow.prompt['3'].inputs.steps = COMFY_STEPS;
-  workflow.prompt['3'].inputs.cfg = COMFY_CFG;
-  workflow.prompt['3'].inputs.sampler_name = COMFY_SAMPLER;
-  workflow.prompt['3'].inputs.scheduler = COMFY_SCHEDULER;
+  // 节点 31: KSampler - 设置采样参数
+  workflow['31'].inputs.seed = seed;
+  workflow['31'].inputs.steps = COMFY_STEPS;
+  workflow['31'].inputs.cfg = COMFY_CFG;
+  workflow['31'].inputs.sampler_name = COMFY_SAMPLER;
+  workflow['31'].inputs.scheduler = COMFY_SCHEDULER;
 
-  workflow.prompt['5'].inputs.width = COMFY_IMAGE_WIDTH;
-  workflow.prompt['5'].inputs.height = COMFY_IMAGE_HEIGHT;
+  // 节点 27: EmptySD3LatentImage - 设置图像尺寸
+  workflow['27'].inputs.width = COMFY_IMAGE_WIDTH;
+  workflow['27'].inputs.height = COMFY_IMAGE_HEIGHT;
 
-  workflow.prompt['9'].inputs.filename_prefix = filenamePrefix;
+  // 节点 9: SaveImage - 设置文件名前缀
+  workflow['9'].inputs.filename_prefix = filenamePrefix;
 
   return workflow;
 }
 
-async function submitComfyPrompt(promptText) {
+/**
+ * 提交 ComfyUI prompt（支持 Flux 双 CLIP）
+ * @param {string|object} promptInput - 如果是字符串，使用旧格式；如果是对象，包含 imagePrompt 和 imagePromptDetailed
+ */
+async function submitComfyPrompt(promptInput) {
   const clientId = uuidv4();
   const seed = Math.floor(Math.random() * 1_000_000_000);
   const filenamePrefix = `story_scene_${Date.now()}_${seed}`;
-  const workflowPayload = createWorkflowPayload(promptText, seed, filenamePrefix);
+  
+  // 兼容旧格式（字符串）和新格式（对象）
+  let imagePrompt, imagePromptDetailed;
+  if (typeof promptInput === 'string') {
+    // 旧格式：单个 prompt
+    imagePrompt = promptInput;
+    imagePromptDetailed = '';
+  } else if (promptInput && typeof promptInput === 'object') {
+    // 新格式：双 prompt
+    imagePrompt = promptInput.imagePrompt || promptInput.prompt || '';
+    imagePromptDetailed = promptInput.imagePromptDetailed || '';
+  } else {
+    throw new Error('Invalid prompt input format');
+  }
+  
+  const workflowPayload = createWorkflowPayload(imagePrompt, imagePromptDetailed, seed, filenamePrefix);
 
   const payload = {
     client_id: clientId,
-    prompt: workflowPayload.prompt,
+    prompt: workflowPayload,
   };
 
   console.log('📨 ComfyUI payload (trimmed):', JSON.stringify(payload).slice(0, 200) + '...');
@@ -101,10 +132,12 @@ async function waitForComfyResult(promptId) {
   while (Date.now() - start < COMFY_TIMEOUT_MS) {
     await new Promise((resolve) => setTimeout(resolve, COMFY_POLL_INTERVAL_MS));
 
-    const historyResponse = await axios.get(`${COMFY_BASE_URL}/history/${promptId}`, {
+    // ComfyUI history API 返回所有历史记录，需要从中查找对应的 promptId
+    const historyResponse = await axios.get(`${COMFY_BASE_URL}/history`, {
       timeout: COMFY_REQUEST_TIMEOUT_MS,
     });
 
+    // historyResponse.data 格式: { [prompt_id]: { ... } }
     const history = historyResponse.data[promptId];
     if (!history || !history.outputs) {
       continue;
@@ -179,7 +212,19 @@ async function runImageGenerationJob(jobId) {
 
     try {
       console.log(`🎬 [Job ${jobId}] Sending scene ${sceneLabel} prompt to ComfyUI`);
-      const { promptId } = await submitComfyPrompt(scene.imagePrompt || scene.story || '');
+      
+      // 使用 Flux 双 CLIP prompt
+      const promptInput = {
+        imagePrompt: scene.imagePrompt || scene.story || '',
+        imagePromptDetailed: scene.imagePromptDetailed || ''
+      };
+      
+      console.log(`📝 [Job ${jobId}] Scene ${sceneLabel} prompts:`, {
+        clip_l: promptInput.imagePrompt.substring(0, 50) + '...',
+        t5xxl: promptInput.imagePromptDetailed ? promptInput.imagePromptDetailed.substring(0, 50) + '...' : '(empty)'
+      });
+      
+      const { promptId } = await submitComfyPrompt(promptInput);
       const result = await waitForComfyResult(promptId);
 
       scene.imageUrl = result.imageUrl;

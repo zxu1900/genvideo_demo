@@ -75,18 +75,22 @@ async function generateStoryWithAI(theme, idea) {
    - "durationSeconds": 建议时长（整数，1-8 之间）
    - "story": 这个分镜要讲述的故事内容，使用温暖、生动、适合儿童的语言
    - "voicePrompt": 给语音合成(TTS)使用的旁白文案，要求口语化、富有情感
-   - "imagePrompt": 用于生成该分镜首帧图像的提示词，采用英文描述，包含场景、角色、情绪、光线等细节
+   - "imagePrompt": 用于 Flux 图像生成的主要提示词（英文），简洁描述核心场景、角色、风格
+   - "imagePromptDetailed": 用于 Flux T5-XXL 的详细提示词（英文），详细描述情绪、光线、构图、艺术风格等细节（可选，留空使用默认）
    - "videoPrompt": 用于生成该分镜完整视频的提示词，采用英文描述，包含镜头感、动作、氛围、画面细节
 3. 语言要求：
    - story 与 voicePrompt 使用中文
-   - imagePrompt 与 videoPrompt 使用英文
-4. JSON 顶层结构必须为：
+   - imagePrompt, imagePromptDetailed 与 videoPrompt 使用英文
+4. imagePrompt 示例：
+   - imagePrompt: "A vibrant children's book illustration in a modern cartoon style."
+   - imagePromptDetailed: "A friendly mother pig is chatting with three playful little piglets in a sunny forest clearing. The piglets have exaggerated, cute expressions (curious, happy, sleepy). Bright, cheerful colors, clean shapes, soft cel-shading. Dynamic and playful composition, morning sunbeams illuminating the scene. High contrast and appealing character design."
+5. JSON 顶层结构必须为：
 {
   "scenes": [
     { ... scene对象 ... }
   ]
 }
-5. 不要输出除 JSON 以外的任何内容，也不要使用 Markdown 代码块。`;
+6. 不要输出除 JSON 以外的任何内容，也不要使用 Markdown 代码块。`;
 
     console.log('🤖 Calling DeepSeek API for story generation...');
     
@@ -147,9 +151,10 @@ function parseStoryboardResponse(rawText, theme, idea) {
       const safeDuration = Number.isFinite(duration) ? Math.min(Math.max(duration, 1), 8) : 6;
       const storyText = String(scene.story || '').trim();
 
-      const fallbackPrompt = storyText
-        ? `Children's story illustration, ${storyText.slice(0, 120)}`
-        : `Children's story theme ${theme}, inspired by ${idea}`;
+      // Flux 双 CLIP 架构的 fallback
+      const fallbackPromptMain = "A vibrant children's book illustration in a modern cartoon style.";
+      // T5-XXL 必须使用英文，不能使用中文 storyText
+      const fallbackPromptDetailed = `Children's story scene with warm atmosphere. Bright colors, friendly characters, appealing design, high contrast, soft lighting.`;
 
       return {
         id: Number.isFinite(scene.id) ? Number(scene.id) : index + 1,
@@ -157,7 +162,12 @@ function parseStoryboardResponse(rawText, theme, idea) {
         durationSeconds: safeDuration,
         story: storyText,
         voicePrompt: String(scene.voicePrompt || storyText).trim(),
-        imagePrompt: String(scene.imagePrompt || fallbackPrompt).trim(),
+        // 主要 prompt (CLIP-L) - 简洁的核心描述
+        imagePrompt: String(scene.imagePrompt || fallbackPromptMain).trim(),
+        // 详细 prompt (T5-XXL) - 详细的扩展描述（必须是英文）
+        imagePromptDetailed: scene.imagePromptDetailed 
+          ? String(scene.imagePromptDetailed).trim() 
+          : fallbackPromptDetailed,
         videoPrompt: String(scene.videoPrompt || `Children's cinematic scene, ${storyText || idea}`).trim(),
       };
     }).filter(scene => scene.story);
@@ -211,12 +221,20 @@ ${idea.substring(0, 100)}${idea.length > 100 ? '...' : ''}
   const paragraphs = story.split('\n\n').filter(Boolean);
   const scenes = paragraphs.slice(0, 6).map((para, idx) => {
     const baseKeywords = extractKeywords(para).join(', ');
+    const sceneText = para.substring(0, 150);
+    
+    // Flux 双 CLIP 架构
+    const imagePromptMain = "A vibrant children's book illustration in a modern cartoon style.";
+    // T5-XXL 必须使用英文，不能使用中文 sceneText
+    const imagePromptDetailed = `Children's story scene with warm atmosphere. Bright colors, friendly characters, appealing design, high contrast, soft lighting.`;
+    
     return {
       id: idx + 1,
       durationSeconds: Math.min(6 + (idx % 3), 8),
       story: para,
       voicePrompt: para,
-      imagePrompt: `Children's illustration, ${theme}, ${baseKeywords || idea}, warm lighting, storybook style`,
+      imagePrompt: imagePromptMain,
+      imagePromptDetailed: imagePromptDetailed,
       videoPrompt: `Children's cinematic animation shot, ${theme}, ${baseKeywords || idea}, vibrant colors, gentle camera movement`,
     };
   });
